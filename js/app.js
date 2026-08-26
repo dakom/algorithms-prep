@@ -2,6 +2,7 @@
 (function () {
   const STORE_KEY = 'algo-prep-v1';
   const THEME_KEY = 'algo-prep-theme';
+  const WIDTH_KEY = 'algo-prep-sidebar-w';
   const MODULES = window.MODULES;
   const esc = window.Highlighter.esc;
   const $ = sel => document.querySelector(sel);
@@ -22,6 +23,31 @@
   }
   applyTheme();
   $('#theme-btn').addEventListener('click', () => { theme = theme === 'light' ? 'dark' : 'light'; storage.setItem(THEME_KEY, theme); applyTheme(); });
+
+  /* ---------- sidebar width (drag the border; double-click resets) ---------- */
+  const SIDEBAR_MIN = 240, SIDEBAR_MAX = 560;
+  function applySidebarWidth(w) {
+    if (w == null) document.documentElement.style.removeProperty('--sidebar-w');
+    else document.documentElement.style.setProperty('--sidebar-w', Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, w)) + 'px');
+  }
+  applySidebarWidth(+storage.getItem(WIDTH_KEY) || null);
+  (function () {
+    const handle = $('#sidebar-resizer');
+    let dragging = false;
+    handle.addEventListener('pointerdown', e => {
+      dragging = true; try { handle.setPointerCapture(e.pointerId); } catch (_) { /* synthetic/odd pointers: fall back to plain move events */ } document.body.classList.add('sidebar-resizing'); e.preventDefault();
+    });
+    handle.addEventListener('pointermove', e => { if (dragging) applySidebarWidth(e.clientX); });
+    const stop = e => {
+      if (!dragging) return;
+      dragging = false; document.body.classList.remove('sidebar-resizing');
+      const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, e.clientX));
+      applySidebarWidth(w); storage.setItem(WIDTH_KEY, String(w));
+    };
+    handle.addEventListener('pointerup', stop);
+    handle.addEventListener('pointercancel', stop);
+    handle.addEventListener('dblclick', () => { applySidebarWidth(null); storage.removeItem(WIDTH_KEY); });
+  })();
 
   /* ---------- persistence ---------- */
   let store;
