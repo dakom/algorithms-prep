@@ -446,6 +446,215 @@ class Ledger {
   ]
 })}
 `
+      },
+
+      /* ------------------------------------------------ 7.3 ------ */
+      {
+        type: 'project',
+        title: 'Project: sliding-window rate limiter',
+        minutes: 15,
+        checklist: [
+          'Stage 1: quota per user with a Map; unknown users start with the full quota',
+          'Stage 2: sliding window — old timestamps evicted from the front, denied requests never counted',
+          'Stage 3: state cleanup without changing the allow() contract',
+          'Stage 4: can explain the distributed version and its failure modes'
+        ],
+        html: `
+<p>The second most common “implement a class” interview after the ledger, and the one most likely at an exchange: <strong>rate limiting</strong>. Same drill — one editor, requirements that evolve. Time is passed in explicitly (<code>now</code>, in milliseconds) so behavior is deterministic; say out loud that in production you would inject a clock the same way, for testability.</p>
+
+${widget('exercise', {
+  id: 'ex-7-2',
+  title: 'class RateLimiter',
+  time: 15,
+  fn: 'RateLimiter',
+  isClass: true,
+  prompt: `<p>Rules for every stage:</p>
+<ul>
+<li><code>new RateLimiter(limit, windowMs)</code>. <code>allow(userId, now)</code> returns <code>true</code> if the request is permitted and <strong>records it</strong>; <code>false</code> otherwise. Denied requests are never recorded.</li>
+<li>Unknown users start with a full quota.</li>
+<li><code>now</code> is a number (ms). Calls for a given user arrive with non-decreasing <code>now</code>.</li>
+</ul>`,
+  starter: `
+class RateLimiter {
+  constructor(limit, windowMs) {
+    this.limit = limit;
+    this.windowMs = windowMs;
+    // per-user state
+  }
+
+  allow(userId, now) {
+    // TODO
+  }
+
+  remaining(userId, now) {
+    // TODO
+  }
+}`,
+  stages: [
+    {
+      title: 'Quota',
+      prompt: `<p>Ignore <code>windowMs</code> for now. Each user may make at most <code>limit</code> requests, ever. Implement <code>allow(userId, now)</code> and <code>remaining(userId, now)</code> (requests the user can still make).</p>`,
+      reasoning: [
+        { cat: 'abstraction', q: 'State?', choices: ['A global counter', 'A <code>Map&lt;userId, count&gt;</code> — per-user find-by-ID', 'An array of all requests', 'A Set of blocked users'], answer: 1,
+          explain: '<p>Per-entity state → Map keyed by the entity.</p>' },
+        { cat: 'edge', q: 'The first call is <code>remaining("new-user")</code>. What should it return, and what must you avoid?', choices: ['0', '<code>limit</code> — and don’t create an entry just for reading (or do, but consistently); never return <code>undefined</code>', '<code>undefined</code>', '<code>NaN</code>'], answer: 1,
+          explain: '<p>Unknown user = full quota. <code>limit - (count.get(id) ?? 0)</code>.</p>' }
+      ],
+      tests: [
+        { name: 'allows up to the limit, then denies', run: (RL) => { const r = new RL(3, 1000); return [r.allow('u', 0), r.allow('u', 1), r.allow('u', 2), r.allow('u', 3), r.allow('u', 4)]; }, expect: [true, true, true, false, false] },
+        { name: 'remaining for an unknown user is the full limit', run: (RL) => { const r = new RL(5, 1000); return r.remaining('nobody', 0); }, expect: 5 },
+        { name: 'remaining decreases only on allowed requests', run: (RL) => { const r = new RL(2, 1000); r.allow('u', 0); const a = r.remaining('u', 0); r.allow('u', 1); r.allow('u', 2); r.allow('u', 3); return [a, r.remaining('u', 3)]; }, expect: [1, 0] },
+        { name: 'users are independent', run: (RL) => { const r = new RL(1, 1000); return [r.allow('a', 0), r.allow('b', 0), r.allow('a', 1), r.allow('b', 1)]; }, expect: [true, true, false, false] },
+        { name: 'limit 0 denies everything', run: (RL) => { const r = new RL(0, 1000); return [r.allow('u', 0), r.remaining('u', 0)]; }, expect: [false, 0] },
+        { name: 'instances are independent', run: (RL) => { const a = new RL(1, 1000), b = new RL(1, 1000); a.allow('u', 0); return b.allow('u', 0); }, expect: true }
+      ],
+      hints: ['<p><code>this.counts = new Map()</code>; <code>allow</code>: read count with <code>?? 0</code>, compare to the limit, increment only when allowing.</p>'],
+      solution: `
+class RateLimiter {
+  constructor(limit, windowMs) {
+    this.limit = limit;
+    this.windowMs = windowMs;
+    this.counts = new Map();                 // userId → allowed requests
+  }
+  allow(userId, now) {
+    const used = this.counts.get(userId) ?? 0;
+    if (used >= this.limit) return false;    // check…
+    this.counts.set(userId, used + 1);       // …then record
+    return true;
+  }
+  remaining(userId, now) {
+    return Math.max(0, this.limit - (this.counts.get(userId) ?? 0));
+  }
+}`,
+      complexity: '<p>“O(1) per call; O(users) space.”</p>'
+    },
+    {
+      title: 'Sliding window',
+      prompt: `<p>Now <code>windowMs</code> matters: a request at time <code>now</code> is allowed if fewer than <code>limit</code> requests were <em>allowed</em> in the interval <code>(now − windowMs, now]</code>. So a request exactly <code>windowMs</code> after an earlier one no longer counts that earlier one. <code>remaining(userId, now)</code> follows the same rule.</p>`,
+      reasoning: [
+        { cat: 'abstraction', q: 'What replaces the counter?', choices: ['A bigger counter', 'A per-user list (queue) of allowed timestamps — evict the ones older than the window from the front, then count what’s left', 'A Set of timestamps', 'A sorted array of users'], answer: 1,
+          explain: '<p>Timestamps arrive in order per user, so the oldest are at the front: <code>while (ts[0] &lt;= now - windowMs) ts.shift()</code> (or a head index). This is a sliding window over time.</p>' },
+        { cat: 'edge', q: 'Boundary: a request at <code>t = 1000</code> with <code>windowMs = 1000</code> and one earlier allowed request at <code>t = 0</code>. Does the earlier one still count?', choices: ['Yes', 'No — the window is <code>(now − windowMs, now]</code>, so <code>t = 0</code> is exactly on the excluded edge', 'Depends on the limit', 'It throws'], answer: 1,
+          explain: '<p>State the boundary rule before coding; it’s the ≤ vs &lt; question from the intervals module wearing a clock.</p>' },
+        { type: 'text', cat: 'explanation', q: 'Explain the sliding-window approach and its cost per call.', min: 40,
+          model: '<p>“Per user I keep the timestamps of allowed requests in arrival order. On each call I drop timestamps that have fallen out of the window from the front, then allow if fewer than the limit remain, appending the new timestamp. Amortized O(1) per call because each timestamp is pushed and shifted once; O(limit) space per active user.”</p>' }
+      ],
+      tests: [
+        { name: 'window slides: old requests stop counting', run: (RL) => { const r = new RL(2, 1000); return [r.allow('u', 0), r.allow('u', 500), r.allow('u', 900), r.allow('u', 1000), r.allow('u', 1499), r.allow('u', 1500)]; }, expect: [true, true, false, true, false, true] },
+        { name: 'boundary: exactly windowMs later is allowed', run: (RL) => { const r = new RL(1, 1000); return [r.allow('u', 0), r.allow('u', 999), r.allow('u', 1000)]; }, expect: [true, false, true] },
+        { name: 'denied requests do not extend the window', run: (RL) => { const r = new RL(1, 1000); r.allow('u', 0); r.allow('u', 900); return r.allow('u', 1000); }, expect: true },
+        { name: 'remaining respects the window', run: (RL) => { const r = new RL(3, 1000); r.allow('u', 0); r.allow('u', 100); return [r.remaining('u', 100), r.remaining('u', 1050), r.remaining('u', 1100)]; }, expect: [1, 2, 3] },
+        { name: 'unknown user', run: (RL) => { const r = new RL(2, 1000); return r.remaining('x', 5000); }, expect: 2 },
+        { name: 'users are independent windows', run: (RL) => { const r = new RL(1, 1000); return [r.allow('a', 0), r.allow('b', 0), r.allow('a', 500), r.allow('b', 1000)]; }, expect: [true, true, false, true] },
+        { name: 'long-running: 5,000 calls stay bounded and correct', run: (RL) => { const r = new RL(10, 100); let allowed = 0; for (let t = 0; t < 5000; t++) if (r.allow('u', t)) allowed++; return allowed; }, expect: 500 }
+      ],
+      antiSolutions: [
+        { name: 'fixed window from first request (never slides)', code: 'class RateLimiter { constructor(l, w) { this.limit = l; this.w = w; this.s = new Map(); } allow(u, now) { let st = this.s.get(u); if (!st || now - st.start >= this.w) { st = { start: now, n: 0 }; this.s.set(u, st); } if (st.n >= this.limit) return false; st.n++; return true; } remaining(u, now) { const st = this.s.get(u); if (!st || now - st.start >= this.w) return this.limit; return this.limit - st.n; } }' },
+        { name: 'uses < instead of <= when evicting (boundary)', code: 'class RateLimiter { constructor(l, w) { this.limit = l; this.w = w; this.ts = new Map(); } _trim(u, now) { const a = this.ts.get(u) ?? []; while (a.length && a[0] < now - this.w) a.shift(); this.ts.set(u, a); return a; } allow(u, now) { const a = this._trim(u, now); if (a.length >= this.limit) return false; a.push(now); return true; } remaining(u, now) { return Math.max(0, this.limit - this._trim(u, now).length); } }' }
+      ],
+      hints: ['<p><code>this.timestamps = new Map()</code> of arrays. A private <code>_evict(userId, now)</code> that shifts while <code>arr[0] &lt;= now - this.windowMs</code>, returning the array.</p>', '<p>Both <code>allow</code> and <code>remaining</code> call <code>_evict</code> first.</p>'],
+      solution: `
+class RateLimiter {
+  constructor(limit, windowMs) {
+    this.limit = limit;
+    this.windowMs = windowMs;
+    this.timestamps = new Map();             // userId → allowed request times, oldest first
+  }
+  _window(userId, now) {
+    let ts = this.timestamps.get(userId);
+    if (!ts) { ts = []; this.timestamps.set(userId, ts); }
+    while (ts.length && ts[0] <= now - this.windowMs) ts.shift();   // fell out of (now − w, now]
+    return ts;
+  }
+  allow(userId, now) {
+    const ts = this._window(userId, now);
+    if (ts.length >= this.limit) return false;
+    ts.push(now);
+    return true;
+  }
+  remaining(userId, now) {
+    return Math.max(0, this.limit - this._window(userId, now).length);
+  }
+}`,
+      solutionExplain: '<p>Mention the alternatives an interviewer may ask about: <strong>fixed windows</strong> (cheap, but allow 2× bursts at the boundary), <strong>token bucket</strong> (O(1) state per user — a count and a last-refill time — allows controlled bursts). The timestamp queue is exact and simple; token bucket is what most production limiters use.</p>',
+      complexity: '<p>“Amortized O(1) per call; O(limit) space per active user.”</p>'
+    },
+    {
+      title: 'Cleanup',
+      prompt: `<p>Memory grows with every user ever seen. Add <code>evictIdle(now)</code>: remove all state for users with no allowed request inside the current window, and return how many users were removed. Add <code>activeUsers(now)</code>: the number of users with at least one request in the window. Neither may change the behavior of <code>allow</code> / <code>remaining</code>.</p>`,
+      reasoning: [
+        { cat: 'algorithm', q: 'How do you find idle users?', choices: ['Track a last-seen time per user and compare, or trim each user’s queue and drop the ones that end up empty — O(users) either way', 'Sort users by name', 'Delete the whole map', 'Use a heap of users by last-seen time (fine, but only if evictIdle is called far more often than allow)'], answer: 0,
+          explain: '<p>A periodic O(users) sweep is the normal answer; a min-heap keyed on last-seen is the optimization to mention, not to write.</p>' },
+        { type: 'text', cat: 'explanation', q: 'What invariant must hold after <code>evictIdle</code>, and how would you test it?', min: 30,
+          model: '<p>“Eviction must be invisible to <code>allow</code>: any user removed had no requests in the window, so their state was equivalent to a fresh user anyway. Test: run a sequence, snapshot every user’s <code>remaining</code>, evict, and check the values are unchanged; also that a removed user is allowed again immediately.”</p>' }
+      ],
+      tests: [
+        { name: 'evicts users idle for a full window, keeps active ones', run: (RL) => { const r = new RL(2, 1000); r.allow('a', 0); r.allow('b', 900); const removed = r.evictIdle(1500); return [removed, r.activeUsers(1500)]; }, expect: [1, 1] },
+        { name: 'eviction is invisible to allow/remaining', run: (RL) => { const r = new RL(2, 1000); r.allow('a', 0); r.allow('b', 900); r.evictIdle(1500); return [r.remaining('a', 1500), r.remaining('b', 1500), r.allow('b', 1500), r.allow('b', 1501)]; }, expect: [2, 1, true, false] },
+        { name: 'nothing idle → 0 removed', run: (RL) => { const r = new RL(2, 1000); r.allow('a', 0); r.allow('b', 0); return [r.evictIdle(500), r.activeUsers(500)]; }, expect: [0, 2] },
+        { name: 'a user with an old AND a recent request is kept (trim, don’t judge by the oldest)', run: (RL) => { const r = new RL(2, 1000); r.allow('b', 0); r.allow('b', 900); const removed = r.evictIdle(1500); return [removed, r.remaining('b', 1500)]; }, expect: [0, 1] },
+        { name: 'activeUsers ignores users whose requests all expired', run: (RL) => { const r = new RL(2, 1000); r.allow('a', 0); r.allow('b', 0); r.allow('b', 800); return [r.activeUsers(1200), r.activeUsers(1900)]; }, expect: [1, 0] },
+        { name: 'empty limiter', run: (RL) => { const r = new RL(2, 1000); return [r.evictIdle(0), r.activeUsers(0)]; }, expect: [0, 0] },
+        { name: 'stage 2 still works after cleanup added', run: (RL) => { const r = new RL(2, 1000); return [r.allow('u', 0), r.allow('u', 500), r.allow('u', 900), r.allow('u', 1000), r.remaining('u', 1000)]; }, expect: [true, true, false, true, 0] }
+      ],
+      antiSolutions: [{ name: 'evicts any user with a request older than the window (even if they also have recent ones)', code: 'class RateLimiter { constructor(l, w) { this.limit = l; this.windowMs = w; this.timestamps = new Map(); } _window(u, now) { let ts = this.timestamps.get(u); if (!ts) { ts = []; this.timestamps.set(u, ts); } while (ts.length && ts[0] <= now - this.windowMs) ts.shift(); return ts; } allow(u, now) { const ts = this._window(u, now); if (ts.length >= this.limit) return false; ts.push(now); return true; } remaining(u, now) { return Math.max(0, this.limit - this._window(u, now).length); } evictIdle(now) { let n = 0; for (const [u, ts] of this.timestamps) { if (!ts.length || ts[0] <= now - this.windowMs) { this.timestamps.delete(u); n++; } } return n; } activeUsers(now) { let n = 0; for (const [u] of this.timestamps) if (this._window(u, now).length) n++; return n; } }' }],
+      hints: ['<p>Loop over the map; trim each user’s queue with <code>_window</code>; if it’s empty, delete the entry.</p>'],
+      solution: `
+class RateLimiter {
+  constructor(limit, windowMs) {
+    this.limit = limit;
+    this.windowMs = windowMs;
+    this.timestamps = new Map();
+  }
+  _window(userId, now) {
+    let ts = this.timestamps.get(userId);
+    if (!ts) { ts = []; this.timestamps.set(userId, ts); }
+    while (ts.length && ts[0] <= now - this.windowMs) ts.shift();
+    return ts;
+  }
+  allow(userId, now) {
+    const ts = this._window(userId, now);
+    if (ts.length >= this.limit) return false;
+    ts.push(now);
+    return true;
+  }
+  remaining(userId, now) {
+    return Math.max(0, this.limit - this._window(userId, now).length);
+  }
+  evictIdle(now) {
+    let removed = 0;
+    for (const [userId, ts] of this.timestamps) {
+      while (ts.length && ts[0] <= now - this.windowMs) ts.shift();
+      if (ts.length === 0) { this.timestamps.delete(userId); removed++; }   // deleting during iteration is safe for Map
+    }
+    return removed;
+  }
+  activeUsers(now) {
+    let active = 0;
+    for (const userId of this.timestamps.keys()) if (this._window(userId, now).length) active++;
+    return active;
+  }
+}`,
+      complexity: '<p>“evictIdle is O(users + expired timestamps); allow stays amortized O(1). In production the sweep runs on a timer.”</p>'
+    },
+    {
+      title: 'Follow-ups',
+      prompt: `<p>No code. Three questions the interviewer asks once the class works.</p>`,
+      reasoning: [
+        { cat: 'algorithm', q: '1. The service runs on 20 instances behind a load balancer. What breaks?', choices: ['Nothing', 'Each instance has its own Map, so a user gets 20× the limit; the state must move to a shared store (e.g. Redis) with an atomic check-and-record (a Lua script, or a sorted set per user with ZADD/ZREMRANGEBYSCORE/ZCARD in a transaction)', 'The window gets shorter', 'Only evictIdle breaks'], answer: 1,
+          explain: '<p>Same lesson as the ledger: in-memory check-then-act is only atomic inside one process. Name the shared store and the atomic primitive.</p>' },
+        { type: 'text', cat: 'explanation', q: '2. Clients send their own timestamps. Why is that a problem, and what do you do instead?', min: 30,
+          model: '<p>“A client-supplied clock can be skewed or forged — a client could claim a future time to reset its window. The server should stamp requests with its own clock (injected, so tests can control it), and in a distributed setup use the shared store’s clock or a single time source to avoid per-instance skew.”</p>' },
+        { cat: 'algorithm', q: '3. Memory: limit = 10,000 requests/hour per user, one million users. What changes?', choices: ['Nothing', 'The timestamp queue is up to 10k entries per user — too much. Switch to a token bucket (two numbers per user) or a fixed-window counter with a sliding estimate; trade exactness for O(1) state', 'Increase the limit', 'Shard users alphabetically'], answer: 1,
+          explain: '<p>Know when the exact algorithm becomes the wrong one. Token bucket: <code>tokens</code> and <code>lastRefill</code> per user, refill proportional to elapsed time, allow if tokens ≥ 1.</p>' }
+      ],
+      tests: [],
+      solution: '// discussion stage',
+      solutionExplain: '<p>Pattern across both projects: <strong>in-process correctness first, then name the atomicity primitive for the distributed version, then name the memory trade-off.</strong> That three-step answer works for almost any “now make it a service” follow-up.</p>'
+    }
+  ]
+})}
+`
       }
     ]
   });

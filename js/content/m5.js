@@ -60,6 +60,49 @@ ${widget('mcq', {
   explain: '<p>Because of the sort, <code>s ≥ 1</code> is guaranteed; the only question is whether it starts before (or at) the current end. When merging, the new end is <code>Math.max(5, e)</code> — not just <code>e</code> — to handle a fully contained interval like <code>[2, 3]</code>.</p>'
 })}
 
+${widget('breakit', {
+  label: 'Break it — the merge that shrinks',
+  q: 'This merge sorts correctly and handles the example. It has one wrong line. Construct an <code>intervals</code> input on which it returns the wrong result.',
+  fn: 'mergeIntervals',
+  name: 'mergeIntervals.js — passes the example',
+  buggy: `
+function mergeIntervals(intervals) {
+  if (intervals.length === 0) return [];
+  const sorted = [...intervals].sort((a, b) => a[0] - b[0]);
+  const result = [];
+  let cur = [...sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const [start, end] = sorted[i];
+    if (start <= cur[1]) cur[1] = end;
+    else { result.push(cur); cur = [start, end]; }
+  }
+  result.push(cur);
+  return result;
+}`,
+  solution: `
+function mergeIntervals(intervals) {
+  if (intervals.length === 0) return [];
+  const sorted = [...intervals].sort((a, b) => a[0] - b[0]);
+  const result = [];
+  let cur = [...sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const [start, end] = sorted[i];
+    if (start <= cur[1]) cur[1] = Math.max(cur[1], end);
+    else { result.push(cur); cur = [start, end]; }
+  }
+  result.push(cur);
+  return result;
+}`,
+  argsTemplate: `
+[
+  [[1, 4], [2, 5], [8, 10], [9, 12]]   // intervals — this one passes; change it
+]`,
+  sampleBreak: [[[1, 10], [2, 3]]],
+  sampleOk: [[[[1, 4], [2, 5], [8, 10], [9, 12]]], [[[1, 2], [2, 3]]]],
+  hint: 'What if the next interval is entirely <em>inside</em> the current one?',
+  explain: '<p><code>cur[1] = end</code> shrinks the current interval when the next one is contained in it. The fix is <code>Math.max(cur[1], end)</code>. “Fully contained” is the hidden test on every interval problem — and now it’s the test <em>you</em> reach for first.</p>'
+})}
+
 ${widget('exercise', {
   id: 'ex-5-1',
   title: 'mergeIntervals(intervals)',
@@ -75,7 +118,9 @@ ${code('js', 'example', `mergeIntervals([[1, 4], [2, 5], [8, 10], [9, 12]])   //
     { cat: 'edge', q: 'Which of these is the most common bug in this problem?', choices: ['Sorting descending', 'Forgetting to push the final “current” interval after the loop', 'Using a Set', 'Off-by-one in the loop index'], answer: 1,
       explain: '<p>The scan emits an interval only when the <em>next</em> one doesn’t overlap — so the last one is never emitted inside the loop. Push it after.</p>' },
     { cat: 'complexity', q: 'Complexity?', choices: ['O(n) — one scan', 'O(n log n) — the sort dominates; the scan is O(n)', 'O(n²)', 'O(log n)'], answer: 1,
-      explain: '<p>Say both parts: “sort is n log n, the merge pass is linear, so n log n overall; O(n) space for the output (or O(1) extra if sorting in place were allowed).”</p>' }
+      explain: '<p>Say both parts: “sort is n log n, the merge pass is linear, so n log n overall; O(n) space for the output (or O(1) extra if sorting in place were allowed).”</p>' },
+    { type: 'text', cat: 'explanation', q: 'Explain the algorithm in three sentences, including the convention you’re assuming for touching intervals.', min: 50,
+      model: '<p>“I’ll sort a copy of the intervals by start so each one can only overlap the current merged interval. Walking through, if the next start is at or before the current end — I’m treating touching intervals as mergeable — I extend the current end to the max of the two; otherwise I emit the current interval and start a new one, remembering to emit the last one after the loop. O(n log n) from the sort, O(n) space.”</p>' }
   ],
   starter: `
 function mergeIntervals(intervals) {
@@ -170,7 +215,21 @@ hasConflict([[9, 11], [10, 12]])   // true`)}`,
     { cat: 'edge', q: 'The conflict condition with sorted intervals is…', choices: ['<code>next.start &lt;= prev.end</code>', '<code>next.start &lt; prev.end</code> — strictly before, so back-to-back is allowed', '<code>next.end &lt; prev.end</code>', '<code>next.start === prev.start</code>'], answer: 1,
       explain: '<p>Strict inequality encodes the “back-to-back is fine” rule. Compare with merging, where ≤ merged touching intervals.</p>' },
     { cat: 'complexity', q: 'Complexity?', choices: ['O(n)', 'O(n log n) for the sort', 'O(n²)', 'O(1)'], answer: 1,
-      explain: '<p>Sort dominates. Without sorting you’d need every pair: O(n²).</p>' }
+      explain: '<p>Sort dominates. Without sorting you’d need every pair: O(n²).</p>' },
+    { type: 'text', cat: 'explanation', q: 'State the convention you’re assuming and the approach, in two sentences.', min: 30,
+      model: '<p>“I’ll assume back-to-back meetings don’t conflict — a meeting starting exactly when another ends is fine. Sort a copy by start time and compare each meeting with the one before it: if it starts strictly before the previous one ends, that’s a conflict. O(n log n) from the sort.”</p>' }
+  ],
+  ownTests: true,
+  ownTemplate: `
+[
+  { name: 'clear overlap', args: [[[1, 5], [3, 6]]], expect: true },
+  // add at least two more — back-to-back, unsorted input hiding a conflict, empty…
+]`,
+  coverage: [
+    { label: 'back-to-back (not a conflict)', hit: args => Array.isArray(args[0]) && args[0].some(a => args[0].some(b => a !== b && a[1] === b[0])) },
+    { label: 'unsorted input', hit: args => Array.isArray(args[0]) && args[0].some((iv, i) => i > 0 && iv[0] < args[0][i - 1][0]) },
+    { label: 'no conflict with 2+ meetings', hit: args => { const iv = args[0]; if (!Array.isArray(iv) || iv.length < 2) return false; const s = [...iv].sort((a, b) => a[0] - b[0]); for (let i = 1; i < s.length; i++) if (s[i][0] < s[i - 1][1]) return false; return true; } },
+    { label: 'fully contained meeting', hit: args => Array.isArray(args[0]) && args[0].some(a => args[0].some(b => a !== b && a[0] <= b[0] && b[1] <= a[1] && (a[0] < b[0] || b[1] < a[1]))) }
   ],
   starter: `
 function hasConflict(intervals) {

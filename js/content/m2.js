@@ -61,43 +61,69 @@ console.log(byAccount.get('A'), byAccount.get('B'));`,
 <tr><td>Unnecessary nested loop</td><td><code>for … for … if (a[i] === b[j])</code> — O(n·m)</td><td>index one side in a Set/Map, scan the other</td></tr>
 </table>
 
-${widget('spotbug', {
-  label: 'Spot the bug',
-  q: 'This counts how many transactions each account has. One line is wrong — click it.',
-  name: 'countByAccount.js',
-  code: `
-function countByAccount(transactions) {
-  const counts = new Map();
+${widget('kata', {
+  fix: true,
+  label: 'Fix it — presence vs truthiness',
+  q: 'This is meant to return each account’s <em>balance</em> after applying signed amounts, treating accounts that have <strong>ever been seen</strong> as present (even at 0) and unknown accounts as <code>null</code>. One line uses truthiness where it needs presence. Find it, fix it, make the tests pass.',
+  fn: 'balanceOf',
+  starter: `
+function balanceOf(transactions, accountId) {
+  const balances = new Map();
   for (const tx of transactions) {
-    const current = counts.get(tx.account);
-    if (current) counts.set(tx.account, current + 1);
-    else counts.set(tx.account, 1);
+    balances.set(tx.account, (balances.get(tx.account) ?? 0) + tx.amount);
   }
-  return counts;
+  const balance = balances.get(accountId);
+  if (balance) return balance;
+  return null;
 }`,
-  bugLine: 5,
-  hint: 'What does <code>counts.get()</code> return for an account seen for the first time — and is that the only value that’s falsy?',
-  explain: '<p>Here it happens to work, because the stored counts are never 0 — but the pattern is the trap: <code>if (current)</code> treats a stored <code>0</code>, <code>""</code> or <code>false</code> as “missing”. If this were a balance map starting at 0, or a boolean flag map, it silently resets. Write the idiom that is <em>always</em> right: <code>counts.set(k, (counts.get(k) ?? 0) + 1)</code>, or test presence with <code>has()</code>.</p>'
+  tests: [
+    { name: 'known account with positive balance', args: [[{ account: 'A', amount: 10 }], 'A'], expect: 10 },
+    { name: 'unknown account → null', args: [[{ account: 'A', amount: 10 }], 'Z'], expect: null },
+    { name: 'known account that nets to 0 → 0, not null', args: [[{ account: 'A', amount: 10 }, { account: 'A', amount: -10 }], 'A'], expect: 0 },
+    { name: 'known account with negative balance', args: [[{ account: 'A', amount: -5 }], 'A'], expect: -5 },
+    { name: 'empty transactions → null', args: [[], 'A'], expect: null }
+  ],
+  antiSolutions: [{ name: 'original', code: 'function balanceOf(t, id) { const b = new Map(); for (const tx of t) b.set(tx.account, (b.get(tx.account) ?? 0) + tx.amount); const x = b.get(id); if (x) return x; return null; }' }],
+  hints: ['<p>Which stored values are falsy but valid? Run the tests and read the failing case.</p>', '<p>Test presence with <code>balances.has(accountId)</code> (or <code>!== undefined</code>), not with truthiness.</p>'],
+  solution: `
+function balanceOf(transactions, accountId) {
+  const balances = new Map();
+  for (const tx of transactions) {
+    balances.set(tx.account, (balances.get(tx.account) ?? 0) + tx.amount);
+  }
+  return balances.has(accountId) ? balances.get(accountId) : null;   // presence, not truthiness
+}`,
+  explain: '<p><code>if (balance)</code> treats <code>0</code> (and <code>-0</code>, <code>NaN</code>) as “missing”. For balances, counters and flags, 0 is a real value — test <em>presence</em> with <code>has()</code>. The same bug hides in <code>if (map.get(k))</code> everywhere; the fix is a reflex worth burning in.</p>'
 })}
 
-${widget('blanks', {
-  label: 'Complete the code',
-  q: 'Index the accounts by ID, then answer “which transactions reference an unknown account?” in one pass.',
-  name: 'unknownAccounts.js',
-  template: `
+${widget('kata', {
+  label: 'Write it — index one side, scan the other',
+  q: 'Given <code>accounts</code> (<code>{ id }</code> objects) and <code>transactions</code> (<code>{ id, account }</code>), return the IDs of transactions whose <code>account</code> is not a known account, in input order. It must be O(n + m), so no <code>find</code>/<code>includes</code> inside the loop.',
+  fn: 'unknownAccounts',
+  starter: `
 function unknownAccounts(accounts, transactions) {
-  const known = new «0»(accounts.map(a => a.id));
+  // index the accounts, then one pass over transactions
+}`,
+  tests: [
+    { name: 'one unknown', args: [[{ id: 'A' }, { id: 'B' }], [{ id: 't1', account: 'A' }, { id: 't2', account: 'Q' }]], expect: ['t2'] },
+    { name: 'all known', args: [[{ id: 'A' }], [{ id: 't1', account: 'A' }]], expect: [] },
+    { name: 'no accounts at all → every transaction is unknown', args: [[], [{ id: 't1', account: 'A' }, { id: 't2', account: 'B' }]], expect: ['t1', 't2'] },
+    { name: 'no transactions', args: [[{ id: 'A' }], []], expect: [] },
+    { name: 'order preserved, repeats kept', args: [[{ id: 'A' }], [{ id: 't1', account: 'X' }, { id: 't2', account: 'A' }, { id: 't3', account: 'X' }]], expect: ['t1', 't3'] },
+    { name: 'large: 50,000 accounts × 50,000 transactions (quadratic times out)', args: [Array.from({ length: 50000 }, (_, i) => ({ id: 'a' + i })), Array.from({ length: 50000 }, (_, i) => ({ id: 't' + i, account: i % 1000 === 0 ? 'ghost' + i : 'a' + i }))], expect: Array.from({ length: 50 }, (_, i) => 't' + (i * 1000)) }
+  ],
+  antiSolutions: [{ name: 'nested some() — quadratic, times out on the large test', expectTimeout: true, code: 'function unknownAccounts(a, t) { const out = []; for (const tx of t) { if (!a.some(x => x.id === tx.account)) out.push(tx.id); } return out; }' }],
+  hints: ['<p><code>const known = new Set(accounts.map(a => a.id))</code>.</p>', '<p>Then <code>transactions.filter(tx => !known.has(tx.account)).map(tx => tx.id)</code>.</p>'],
+  solution: `
+function unknownAccounts(accounts, transactions) {
+  const known = new Set(accounts.map(a => a.id));            // O(n) index
   const result = [];
-  for (const tx of transactions) {
-    if («1») result.push(tx.id);
+  for (const tx of transactions) {                           // O(m) scan
+    if (!known.has(tx.account)) result.push(tx.id);
   }
   return result;
 }`,
-  blanks: [
-    { choices: ['Set', 'Map', 'Array', 'Object'], answer: 0 },
-    { choices: ['!known.has(tx.account)', 'known.get(tx.account) === undefined', '!accounts.includes(tx.account)', 'known.has(tx.account)'], answer: 0 }
-  ],
-  explain: '<p>A Set of IDs turns “is this account known?” into O(1); the scan over transactions is O(m). Total O(n + m) versus O(n·m) for <code>accounts.find(...)</code> inside the loop. Say that contrast out loud in interviews — it’s the whole point of the structure.</p>'
+  explain: '<p>O(n + m) versus O(n·m). The large test has 20k × 20k = 400M comparisons for the nested version — it trips the loop guard, which is the point: interviewers ask “what happens at scale?” and this is the concrete answer.</p>'
 })}
 
 ${callout('say', 'The sentence to say', `<p>“I'll index the ___ in a Map/Set so lookups are O(1), then walk the ___ once. That's O(n + m) time and O(n) extra space.” Fill in the blanks for any indexing problem.</p>`)}
@@ -209,7 +235,9 @@ ${code('js', 'example', `totalsByAccount([
     { cat: 'edge', q: 'The first time you see account <code>"A"</code>, <code>totals.get("A")</code> is <code>undefined</code>. What does <code>undefined + 10</code> give?', choices: ['10', '<code>NaN</code>', '<code>"undefined10"</code>', 'A TypeError'], answer: 1,
       explain: '<p><code>NaN</code>, silently. Which then poisons every later addition for that key. This is <em>the</em> aggregation bug; default the missing key with <code>?? 0</code>.</p>' },
     { cat: 'complexity', q: 'Complexity for n transactions across m distinct accounts?', choices: ['O(n·m) time', 'O(n) time, O(m) space', 'O(n log n) time', 'O(m) time'], answer: 1,
-      explain: '<p>Each transaction does O(1) map work → O(n). The map holds one entry per distinct account → O(m) space.</p>' }
+      explain: '<p>Each transaction does O(1) map work → O(n). The map holds one entry per distinct account → O(m) space.</p>' },
+    { type: 'text', cat: 'explanation', q: 'Say the approach and complexity in two sentences.', min: 40,
+      model: '<p>“One pass over the transactions, accumulating into a Map from account to running total — reading the current total with a default of 0 so the first sight of an account doesn’t produce NaN. O(n) time for n transactions, O(m) space for m distinct accounts, which is also the size of the output.”</p>' }
   ],
   starter: `
 function totalsByAccount(transactions) {
@@ -294,7 +322,9 @@ findPair([1, 2, 3], 100)      // null`)}`,
     { cat: 'edge', q: '<code>findPair([3, 2, 4], 6)</code> — what’s the trap?', choices: ['There is no answer', 'Returning <code>[0, 0]</code> by pairing the 3 with itself', 'Integer overflow', 'Negative numbers'], answer: 1,
       explain: '<p>3 + 3 = 6, but there’s only one 3. Checking the map <em>before</em> inserting the current element prevents self-pairing naturally. The right answer is <code>[1, 2]</code> (2 + 4).</p>' },
     { cat: 'complexity', q: 'Time complexity of the one-pass version vs brute force?', choices: ['O(n) vs O(n²)', 'O(n log n) vs O(n²)', 'O(n) vs O(n log n)', 'Both O(n)'], answer: 0,
-      explain: '<p>Say the contrast explicitly: “the nested loop is O(n²); indexing complements in a map makes it O(n) with O(n) extra space.”</p>' }
+      explain: '<p>Say the contrast explicitly: “the nested loop is O(n²); indexing complements in a map makes it O(n) with O(n) extra space.”</p>' },
+    { type: 'text', cat: 'explanation', q: 'Explain the one-pass idea, including why an element can’t pair with itself.', min: 40,
+      model: '<p>“For each element I look up its complement, target minus the value, in a Map of values seen so far mapped to their index. If it’s there I return both indices; otherwise I record the current value. Because I check before inserting, the map only ever holds earlier elements, so nothing pairs with itself. O(n) time and space instead of the O(n²) nested loop.”</p>' }
   ],
   starter: `
 function findPair(nums, target) {

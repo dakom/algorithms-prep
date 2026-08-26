@@ -277,6 +277,26 @@ function RUNNER_CORE() {
     return { valid, total: tests.length, coverage };
   }
 
-  G.RunnerCore = { fmt, deepEqual, clone, runSuite, runOwn, guardLoops, loadSymbol, loadSymbols, errText };
+  /* runBreak: the learner supplies arguments that should make a buggy implementation
+     disagree with the reference. emit(0, referenceResult), emit(1, buggyResult). */
+  function runBreak(spec, emit, opts) {
+    const H = buildHelpers(spec);
+    let args;
+    try { args = new Function('return (' + spec.argsSrc + ');')(); }
+    catch (e) { return { loadError: 'Your arguments are not valid JavaScript — ' + errText(e) }; }
+    if (!Array.isArray(args)) return { loadError: 'Write the arguments as an array literal — one element per parameter, e.g. [[["A","B"]], "A", "B"]' };
+    const ref = loadUser({ code: spec.refCode, fn: spec.fn }, opts);
+    if (ref.error) return { loadError: 'internal: reference failed to load: ' + ref.error };
+    const bug = loadUser({ code: spec.buggyCode, fn: spec.fn }, opts);
+    if (bug.error) return { loadError: 'internal: buggy version failed to load: ' + bug.error };
+    const refRes = runOne(ref.fn, { name: 'reference', args }, H, opts);
+    emit(0, refRes);
+    const bugRes = runOne(bug.fn, { name: 'buggy', args }, H, opts);
+    emit(1, bugRes);
+    const differ = (!!refRes.error !== !!bugRes.error) || refRes.actual !== bugRes.actual;
+    return { differ, args: fmt(args) };
+  }
+
+  G.RunnerCore = { fmt, deepEqual, clone, runSuite, runOwn, runBreak, guardLoops, loadSymbol, loadSymbols, errText };
 }
 if (typeof module !== 'undefined' && module.exports) { RUNNER_CORE(); module.exports = globalThis.RunnerCore; }

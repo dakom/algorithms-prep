@@ -392,6 +392,239 @@ function countReachable(transactions, source, minAmount = -Infinity) {
 
       /* ------------------------------------------------ 8.3 ------ */
       {
+        type: 'project',
+        title: 'Mock 2: merchant spend',
+        minutes: 20,
+        checklist: [
+          'Named the pattern for each part before coding (aggregate → top-K → stateful → sort + window)',
+          'Reused part 1 inside part 3 instead of rewriting it',
+          'Finished under 20 minutes'
+        ],
+        html: `
+<p>A second dress rehearsal with a different pattern family — so the reflex isn't just “it's probably a graph”. Same rules: 20 minutes, four parts, the pattern is not announced.</p>
+
+${widget('exercise', {
+  id: 'ex-8-2',
+  title: 'Merchant spend analytics',
+  time: 20,
+  interview: true,
+  fn: 'spendByMerchant',
+  prompt: `<p>A card-processing team gives you transactions:</p>
+${code('js', 'input shape', `[
+  { merchant: "coffee", amount: 4,   time: 1000 },
+  { merchant: "grocer", amount: 82,  time: 2000 },
+  { merchant: "coffee", amount: 5,   time: 3000 }
+]`)}
+<p><code>time</code> is milliseconds; the input is <em>not</em> sorted. Requirements change four times; keep everything in the editor.</p>`,
+  starter: `
+// Part 1
+function spendByMerchant(transactions) {
+
+}`,
+  stages: [
+    {
+      title: 'Part 1 · totals',
+      fn: 'spendByMerchant',
+      prompt: `<p>Implement <code>spendByMerchant(transactions)</code>: total amount per merchant, as a plain object (a Map is accepted).</p>`,
+      reasoning: [
+        { type: 'text', cat: 'abstraction', q: 'Restate: entities, relationship, output?', min: 30,
+          model: '<p>“Entities are transactions with a merchant key; the output is one total per merchant — an aggregation, so a Map from merchant to running sum. O(n).”</p>' },
+        { cat: 'algorithm', q: 'Approach?', choices: ['Sort by merchant, then scan groups', 'One pass with a Map, accumulating with a default of 0', 'Nested loops', 'A heap'], answer: 1,
+          explain: '<p>Sorting works but costs O(n log n) for no gain.</p>' }
+      ],
+      tests: [
+        { name: 'example', args: [[{ merchant: 'coffee', amount: 4, time: 1000 }, { merchant: 'grocer', amount: 82, time: 2000 }, { merchant: 'coffee', amount: 5, time: 3000 }]], expect: { coffee: 9, grocer: 82 } },
+        { name: 'empty', args: [[]], expect: {} },
+        { name: 'refunds net out', args: [[{ merchant: 'a', amount: 10, time: 1 }, { merchant: 'a', amount: -10, time: 2 }]], expect: { a: 0 } },
+        { name: 'many merchants', args: [Array.from({ length: 300 }, (_, i) => ({ merchant: 'm' + (i % 3), amount: 1, time: i }))], expect: { m0: 100, m1: 100, m2: 100 } }
+      ],
+      hints: ['<p><code>(totals.get(m) ?? 0) + amount</code>.</p>'],
+      solution: `
+function spendByMerchant(transactions) {
+  const totals = new Map();
+  for (const { merchant, amount } of transactions) {
+    totals.set(merchant, (totals.get(merchant) ?? 0) + amount);
+  }
+  return Object.fromEntries(totals);
+}`,
+      complexity: '<p>“O(n) time, O(m) space for m merchants.”</p>'
+    },
+    {
+      title: 'Part 2 · top merchants',
+      fn: 'topMerchants',
+      prompt: `<p>Implement <code>topMerchants(transactions, k)</code>: the <code>k</code> merchants with the highest total spend, highest first. Fewer than <code>k</code> merchants → all of them. No ties in the tests.</p>`,
+      reasoning: [
+        { cat: 'abstraction', q: 'Which two patterns?', choices: ['Graph + BFS', 'Aggregate (reuse part 1), then rank: sort or a size-k min-heap', 'Sort + intervals', 'Set + binary search'], answer: 1,
+          explain: '<p>Say “reuse part 1” out loud.</p>' },
+        { type: 'text', cat: 'complexity', q: 'Complexity of sort-based vs heap-based ranking, in the problem’s terms?', min: 30,
+          model: '<p>“Aggregation is O(n). Sorting the m merchant totals is O(m log m); a min-heap of size k is O(m log k). For a one-off query with small m, sorting is the right first answer.”</p>' }
+      ],
+      tests: [
+        { name: 'top 2', args: [[{ merchant: 'a', amount: 5, time: 1 }, { merchant: 'b', amount: 50, time: 2 }, { merchant: 'c', amount: 20, time: 3 }, { merchant: 'a', amount: 30, time: 4 }], 2], expect: ['b', 'a'] },
+        { name: 'many small beat one big', args: [[{ merchant: 'big', amount: 60, time: 1 }, { merchant: 'small', amount: 40, time: 2 }, { merchant: 'small', amount: 40, time: 3 }], 1], expect: ['small'] },
+        { name: 'k larger than merchants', args: [[{ merchant: 'a', amount: 1, time: 1 }, { merchant: 'b', amount: 2, time: 2 }], 5], expect: ['b', 'a'] },
+        { name: 'k = 0', args: [[{ merchant: 'a', amount: 1, time: 1 }], 0], expect: [] },
+        { name: 'empty', args: [[], 3], expect: [] },
+        { name: 'part 1 still works', args: [[{ merchant: 'x', amount: 2, time: 1 }, { merchant: 'x', amount: 3, time: 2 }]], run: (fn, H, txs) => { const f = H.fns.spendByMerchant; if (typeof f !== 'function') throw new Error('spendByMerchant is gone — keep part 1'); return f(txs); }, expect: { x: 5 } }
+      ],
+      hints: ['<p><code>Object.entries(spendByMerchant(transactions)).sort((a, b) => b[1] - a[1]).slice(0, k).map(([m]) => m)</code>.</p>'],
+      solution: `
+function spendByMerchant(transactions) {
+  const totals = new Map();
+  for (const { merchant, amount } of transactions) {
+    totals.set(merchant, (totals.get(merchant) ?? 0) + amount);
+  }
+  return Object.fromEntries(totals);
+}
+
+function topMerchants(transactions, k) {
+  return Object.entries(spendByMerchant(transactions))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, k)
+    .map(([merchant]) => merchant);
+}`,
+      complexity: '<p>“O(n + m log m).”</p>'
+    },
+    {
+      title: 'Part 3 · a live tracker',
+      fn: 'SpendTracker',
+      isClass: true,
+      prompt: `<p>Change: transactions now arrive one at a time. Implement <code>class SpendTracker</code> with <code>record(transaction)</code>, <code>total(merchant)</code> (0 if unknown), <code>top(k)</code> (same semantics as part 2, computed from everything recorded so far) and <code>history(merchant)</code> (the recorded transactions for that merchant in arrival order — return a copy).</p>`,
+      reasoning: [
+        { cat: 'abstraction', q: 'What state does the class hold?', choices: ['An array of all transactions, re-aggregated on every call', 'A running <code>Map&lt;merchant, total&gt;</code> updated on record (O(1)), plus a <code>Map&lt;merchant, transaction[]&gt;</code> for history; <code>top(k)</code> ranks the totals map', 'A heap of transactions', 'A Set of merchants'], answer: 1,
+          explain: '<p>The aggregation becomes long-lived state; the ranking runs per query. Same layers as before, different lifetime.</p>' },
+        { type: 'text', cat: 'explanation', q: 'What changes in the trade-offs when this becomes a class with queries?', min: 30,
+          model: '<p>“Recording is now O(1) and totals are always current, while <code>top(k)</code> is O(m log m) per query. If queries are frequent and merchants numerous I’d maintain a sorted structure incrementally; for now the simple version is correct and I’d say so.”</p>' }
+      ],
+      tests: [
+        { name: 'record then total', run: (ST) => { const t = new ST(); t.record({ merchant: 'a', amount: 5, time: 1 }); t.record({ merchant: 'a', amount: 7, time: 2 }); return [t.total('a'), t.total('zzz')]; }, expect: [12, 0] },
+        { name: 'top(k) over recorded data', run: (ST) => { const t = new ST(); t.record({ merchant: 'a', amount: 5, time: 1 }); t.record({ merchant: 'b', amount: 50, time: 2 }); t.record({ merchant: 'c', amount: 20, time: 3 }); t.record({ merchant: 'a', amount: 30, time: 4 }); return [t.top(2), t.top(10)]; }, expect: [['b', 'a'], ['b', 'a', 'c']] },
+        { name: 'history in arrival order, copy', run: (ST) => { const t = new ST(); t.record({ merchant: 'a', amount: 1, time: 5 }); t.record({ merchant: 'b', amount: 2, time: 6 }); t.record({ merchant: 'a', amount: 3, time: 7 }); const h = t.history('a'); h.push({ merchant: 'a', amount: 999, time: 9 }); return [t.history('a').map(x => x.amount), t.history('nobody')]; }, expect: [[1, 3], []] },
+        { name: 'empty tracker', run: (ST) => { const t = new ST(); return [t.top(3), t.total('a')]; }, expect: [[], 0] },
+        { name: 'instances independent', run: (ST) => { const a = new ST(), b = new ST(); a.record({ merchant: 'x', amount: 1, time: 1 }); return b.total('x'); }, expect: 0 }
+      ],
+      hints: ['<p>Two Maps in the constructor. <code>record</code> updates both; <code>top</code> sorts <code>[...this.totals]</code>.</p>'],
+      solution: `
+function spendByMerchant(transactions) {
+  const totals = new Map();
+  for (const { merchant, amount } of transactions) {
+    totals.set(merchant, (totals.get(merchant) ?? 0) + amount);
+  }
+  return Object.fromEntries(totals);
+}
+
+function topMerchants(transactions, k) {
+  return Object.entries(spendByMerchant(transactions))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, k)
+    .map(([merchant]) => merchant);
+}
+
+class SpendTracker {
+  constructor() {
+    this.totals = new Map();           // merchant → total
+    this.byMerchant = new Map();       // merchant → transactions[]
+  }
+  record(tx) {
+    this.totals.set(tx.merchant, (this.totals.get(tx.merchant) ?? 0) + tx.amount);
+    if (!this.byMerchant.has(tx.merchant)) this.byMerchant.set(tx.merchant, []);
+    this.byMerchant.get(tx.merchant).push({ ...tx });
+  }
+  total(merchant) {
+    return this.totals.get(merchant) ?? 0;
+  }
+  top(k) {
+    return [...this.totals].sort((a, b) => b[1] - a[1]).slice(0, k).map(([m]) => m);
+  }
+  history(merchant) {
+    return (this.byMerchant.get(merchant) ?? []).map(tx => ({ ...tx }));
+  }
+}`,
+      complexity: '<p>“record O(1); total O(1); top O(m log m); history O(h).”</p>'
+    },
+    {
+      title: 'Part 4 · burst detection',
+      fn: 'burstyMerchants',
+      prompt: `<p>Change: fraud wants merchants with suspicious bursts. Implement <code>burstyMerchants(transactions, windowMs, threshold)</code>: the merchants for which the total amount inside <em>some</em> window of <code>windowMs</code> (a closed interval <code>[t, t + windowMs]</code>) is <strong>strictly greater</strong> than <code>threshold</code>. Return them sorted alphabetically. Remember the input is unsorted.</p>`,
+      reasoning: [
+        { cat: 'abstraction', q: 'Which pattern?', choices: ['Graph', 'Group by merchant, sort each merchant’s transactions by time, then a sliding window over time: advance the right edge, shrink the left while the span exceeds windowMs, track the max sum', 'Heap of amounts', 'Binary search on amounts'], answer: 1,
+          explain: '<p>Sort + window. The window is variable-size in count, fixed-size in time.</p>' },
+        { type: 'text', cat: 'complexity', q: 'Complexity?', min: 20,
+          model: '<p>“Grouping is O(n); sorting each group is O(n log n) overall; the two-pointer window is O(n) since each transaction enters and leaves once. O(n log n) total.”</p>' }
+      ],
+      tests: [
+        { name: 'burst inside the window', args: [[{ merchant: 'a', amount: 60, time: 0 }, { merchant: 'a', amount: 60, time: 500 }, { merchant: 'b', amount: 60, time: 0 }, { merchant: 'b', amount: 60, time: 5000 }], 1000, 100], expect: ['a'] },
+        { name: 'unsorted input', args: [[{ merchant: 'a', amount: 60, time: 500 }, { merchant: 'a', amount: 60, time: 0 }], 1000, 100], expect: ['a'] },
+        { name: 'unsorted input must not create a false burst', args: [[{ merchant: 'a', amount: 60, time: 0 }, { merchant: 'a', amount: 60, time: 5000 }, { merchant: 'a', amount: 60, time: 2500 }], 1000, 100], expect: [] },
+        { name: 'exactly at the threshold is not a burst', args: [[{ merchant: 'a', amount: 50, time: 0 }, { merchant: 'a', amount: 50, time: 10 }], 1000, 100], expect: [] },
+        { name: 'window boundary is inclusive', args: [[{ merchant: 'a', amount: 60, time: 0 }, { merchant: 'a', amount: 60, time: 1000 }], 1000, 100], expect: ['a'] },
+        { name: 'just outside the window', args: [[{ merchant: 'a', amount: 60, time: 0 }, { merchant: 'a', amount: 60, time: 1001 }], 1000, 100], expect: [] },
+        { name: 'single big transaction is a burst', args: [[{ merchant: 'z', amount: 500, time: 0 }], 10, 100], expect: ['z'] },
+        { name: 'several merchants, alphabetical', args: [[{ merchant: 'z', amount: 200, time: 0 }, { merchant: 'b', amount: 200, time: 0 }, { merchant: 'm', amount: 1, time: 0 }], 10, 100], expect: ['b', 'z'] },
+        { name: 'empty', args: [[], 1000, 100], expect: [] },
+        { name: 'window slides past an old spike', args: [[{ merchant: 'a', amount: 90, time: 0 }, { merchant: 'a', amount: 5, time: 2000 }, { merchant: 'a', amount: 5, time: 2500 }, { merchant: 'a', amount: 5, time: 3000 }], 1000, 100], expect: [] }
+      ],
+      antiSolutions: [{ name: 'forgets to sort by time', code: 'function burstyMerchants(txs, w, th) { const g = new Map(); for (const t of txs) { if (!g.has(t.merchant)) g.set(t.merchant, []); g.get(t.merchant).push(t); } const out = []; for (const [m, list] of g) { let l = 0, sum = 0, hit = false; for (let r = 0; r < list.length; r++) { sum += list[r].amount; while (list[r].time - list[l].time > w) { sum -= list[l].amount; l++; } if (sum > th) hit = true; } if (hit) out.push(m); } return out.sort(); }' }],
+      hints: ['<p>Group by merchant (Map of arrays), sort each by <code>time</code>.</p>', '<p>Two pointers per merchant: add <code>list[r]</code>, then <code>while (list[r].time - list[l].time &gt; windowMs) { sum -= list[l].amount; l++; }</code>; check <code>sum &gt; threshold</code>.</p>'],
+      solution: `
+function spendByMerchant(transactions) {
+  const totals = new Map();
+  for (const { merchant, amount } of transactions) {
+    totals.set(merchant, (totals.get(merchant) ?? 0) + amount);
+  }
+  return Object.fromEntries(totals);
+}
+
+function topMerchants(transactions, k) {
+  return Object.entries(spendByMerchant(transactions))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, k)
+    .map(([merchant]) => merchant);
+}
+
+class SpendTracker {
+  constructor() { this.totals = new Map(); this.byMerchant = new Map(); }
+  record(tx) {
+    this.totals.set(tx.merchant, (this.totals.get(tx.merchant) ?? 0) + tx.amount);
+    if (!this.byMerchant.has(tx.merchant)) this.byMerchant.set(tx.merchant, []);
+    this.byMerchant.get(tx.merchant).push({ ...tx });
+  }
+  total(merchant) { return this.totals.get(merchant) ?? 0; }
+  top(k) { return [...this.totals].sort((a, b) => b[1] - a[1]).slice(0, k).map(([m]) => m); }
+  history(merchant) { return (this.byMerchant.get(merchant) ?? []).map(tx => ({ ...tx })); }
+}
+
+function burstyMerchants(transactions, windowMs, threshold) {
+  const byMerchant = new Map();
+  for (const tx of transactions) {
+    if (!byMerchant.has(tx.merchant)) byMerchant.set(tx.merchant, []);
+    byMerchant.get(tx.merchant).push(tx);
+  }
+  const flagged = [];
+  for (const [merchant, list] of byMerchant) {
+    list.sort((a, b) => a.time - b.time);            // sort first…
+    let left = 0, sum = 0, bursty = false;
+    for (let right = 0; right < list.length; right++) {   // …then slide
+      sum += list[right].amount;
+      while (list[right].time - list[left].time > windowMs) { sum -= list[left].amount; left++; }
+      if (sum > threshold) { bursty = true; break; }
+    }
+    if (bursty) flagged.push(merchant);
+  }
+  return flagged.sort();
+}`,
+      solutionExplain: '<p>Four parts, four patterns: aggregate → rank → stateful → sort + window. Notice what carried over: the Map of groups from part 1 is the skeleton of part 4. A mixed interview is testing whether you see the shared skeleton.</p>',
+      complexity: '<p>“O(n log n) from sorting within groups; the window pass is O(n).”</p>',
+      followUp: { type: 'text', q: 'Last question: “Transactions stream in; flag a burst the moment it happens.” What changes?',
+        model: '<p>“Keep a per-merchant queue of recent transactions (like the rate limiter): on each arrival, append, evict from the front anything older than the window, maintain the running sum, and flag if it exceeds the threshold. Amortized O(1) per transaction, O(window size) memory per merchant — the same structure, kept live instead of recomputed.”</p>' }
+    }
+  ]
+})}
+`
+      },
+
+      /* ------------------------------------------------ 8.4 ------ */
+      {
         type: 'read',
         title: 'Debrief',
         minutes: 3,

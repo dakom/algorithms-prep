@@ -114,7 +114,9 @@ ${code('js', 'example', `buildGraph([["A", "B"], ["A", "C"], ["B", "D"]])
     { cat: 'abstraction', q: 'What is the adjacency list, in Module 2 terms?', choices: ['A Set of nodes', 'A group-by: Map from source node → list of destinations', 'A sorted array of edges', 'A heap of edges'], answer: 1,
       explain: '<p>It’s the grouping idiom from Module 2 — <code>if (!m.has(k)) m.set(k, []); m.get(k).push(v)</code> — applied to edges. Same reflex, new costume.</p>' },
     { cat: 'edge', q: 'Why create a key for the destination node too?', choices: ['Because Maps need even numbers of keys', 'So that later traversal can iterate <code>adj.get(node)</code> for any node without hitting <code>undefined</code>', 'To make the Map sorted', 'It isn’t necessary'], answer: 1,
-      explain: '<p>Robustness. A traversal that reaches “D” asks for D’s neighbors; if D has no key that’s a crash (or a silent skip, which is worse).</p>' }
+      explain: '<p>Robustness. A traversal that reaches “D” asks for D’s neighbors; if D has no key that’s a crash (or a silent skip, which is worse).</p>' },
+    { type: 'text', cat: 'explanation', q: 'Describe the structure you’re building and why, in one or two sentences.', min: 25,
+      model: '<p>“An adjacency list: a Map from each node to the array of nodes it has edges to, built in one pass over the edge list. It makes ‘what are this node’s neighbors?’ O(1), which is the question every traversal asks repeatedly.”</p>' }
   ],
   starter: `
 function buildGraph(edges) {
@@ -188,12 +190,18 @@ ${widget('trace', {
   explain: '<p>From C, DFS tries D — already visited — so it skips to E. From E, A is already visited: without the <code>visited</code> check, E → A → B → … would loop forever. That single check is what makes traversal terminate on cyclic graphs.</p>'
 })}
 
-${widget('spotbug', {
-  label: 'Spot the bug',
-  q: 'This should return whether <code>target</code> is reachable from <code>start</code>. On a graph with a cycle it never returns. Click the missing-logic line (the line where the check should be but isn’t).',
-  name: 'reachable.js',
-  code: `
-function reachable(adj, start, target) {
+${widget('kata', {
+  fix: true,
+  label: 'Fix it — the set that is never read',
+  q: 'This should return whether <code>target</code> is reachable from <code>start</code>. On a graph with a cycle it never returns (the test harness will report a timeout). Fix it so every test passes.',
+  fn: 'reachable',
+  starter: `
+function reachable(edges, start, target) {
+  const adj = new Map();
+  for (const [a, b] of edges) {
+    if (!adj.has(a)) adj.set(a, []);
+    adj.get(a).push(b);
+  }
   const visited = new Set();
   function dfs(node) {
     if (node === target) return true;
@@ -205,35 +213,82 @@ function reachable(adj, start, target) {
   }
   return dfs(start);
 }`,
-  bugLine: 7,
-  hint: 'The set is created and added to… but where is it ever <em>read</em>?',
-  explain: '<p><code>visited</code> is written but never consulted. Line 7 must skip already-visited nodes: <code>if (!visited.has(next) && dfs(next)) return true;</code> — or put the guard at the top of <code>dfs</code>. Creating the set and forgetting to check it is the most common graph bug in interviews.</p>'
+  tests: [
+    { name: 'simple path', args: [[['A', 'B'], ['B', 'C']], 'A', 'C'], expect: true },
+    { name: 'no path', args: [[['A', 'B']], 'B', 'A'], expect: false },
+    { name: 'cycle without the target must terminate', args: [[['A', 'B'], ['B', 'A']], 'A', 'C'], expect: false },
+    { name: 'cycle on the way to the target', args: [[['A', 'B'], ['B', 'A'], ['B', 'C']], 'A', 'C'], expect: true },
+    { name: 'diamond', args: [[['A', 'B'], ['A', 'C'], ['B', 'D'], ['C', 'D']], 'A', 'D'], expect: true }
+  ],
+  antiSolutions: [{ name: 'original', code: 'function reachable(e, s, t) { const adj = new Map(); for (const [a, b] of e) { if (!adj.has(a)) adj.set(a, []); adj.get(a).push(b); } const v = new Set(); function dfs(n) { if (n === t) return true; v.add(n); for (const x of adj.get(n) ?? []) { if (dfs(x)) return true; } return false; } return dfs(s); }' }],
+  hints: ['<p>The set is created and added to — but where is it ever <em>read</em>?</p>', '<p>Guard the recursion: <code>if (visited.has(node)) return false;</code> at the top of <code>dfs</code>, before adding.</p>'],
+  solution: `
+function reachable(edges, start, target) {
+  const adj = new Map();
+  for (const [a, b] of edges) {
+    if (!adj.has(a)) adj.set(a, []);
+    adj.get(a).push(b);
+  }
+  const visited = new Set();
+  function dfs(node) {
+    if (node === target) return true;
+    if (visited.has(node)) return false;     // the missing line
+    visited.add(node);
+    for (const next of adj.get(node) ?? []) {
+      if (dfs(next)) return true;
+    }
+    return false;
+  }
+  return dfs(start);
+}`,
+  explain: '<p>Creating <code>visited</code> and forgetting to <em>check</em> it is the most common graph bug in interviews — the code looks right at a glance. Your tell: a traversal that has a visited set but no <code>visited.has(...)</code> anywhere.</p>'
 })}
 
-${widget('blanks', {
-  label: 'Complete the iterative DFS',
-  q: 'Same algorithm with an explicit stack instead of recursion (no stack-overflow risk on deep graphs).',
-  name: 'dfs-iterative.js',
-  template: `
-function collectReachable(adj, start) {
+${widget('kata', {
+  label: 'Write it — iterative DFS, collect everything reachable',
+  q: 'Return the <strong>Set</strong> of all nodes reachable from <code>start</code> (including <code>start</code>), using an explicit stack instead of recursion. Edges are directed <code>[from, to]</code> pairs.',
+  fn: 'collectReachable',
+  starter: `
+function collectReachable(edges, start) {
+  const adj = new Map();
+  for (const [a, b] of edges) {
+    if (!adj.has(a)) adj.set(a, []);
+    adj.get(a).push(b);
+  }
+  const visited = new Set();
+  const stack = [start];
+  // while the stack is not empty: pop, skip if seen, mark, push unseen neighbors
+  return visited;
+}`,
+  tests: [
+    { name: 'chain', args: [[['A', 'B'], ['B', 'C']], 'A'], expect: ['A', 'B', 'C'] },
+    { name: 'direction respected', args: [[['A', 'B'], ['C', 'A']], 'A'], expect: ['A', 'B'] },
+    { name: 'cycle terminates', args: [[['A', 'B'], ['B', 'A'], ['B', 'C']], 'A'], expect: ['A', 'B', 'C'] },
+    { name: 'isolated start', args: [[['X', 'Y']], 'A'], expect: ['A'] },
+    { name: 'diamond, each node once', args: [[['A', 'B'], ['A', 'C'], ['B', 'D'], ['C', 'D']], 'A'], expect: ['A', 'B', 'C', 'D'] },
+    { name: 'long chain (3,000)', args: [Array.from({ length: 3000 }, (_, i) => ['n' + i, 'n' + (i + 1)]), 'n0'], check: (out) => ({ ok: (out instanceof Set ? out.size : Array.isArray(out) ? new Set(out).size : 0) === 3001, expected: 'a Set of 3001 nodes' }) }
+  ],
+  hints: ['<p><code>while (stack.length) { const node = stack.pop(); … }</code></p>', '<p>After popping: <code>if (visited.has(node)) continue; visited.add(node);</code> then push each unvisited neighbor.</p>'],
+  solution: `
+function collectReachable(edges, start) {
+  const adj = new Map();
+  for (const [a, b] of edges) {
+    if (!adj.has(a)) adj.set(a, []);
+    adj.get(a).push(b);
+  }
   const visited = new Set();
   const stack = [start];
   while (stack.length) {
-    const node = stack.«0»();
-    if (visited.has(node)) «1»;
+    const node = stack.pop();                 // pop = most recent = depth-first
+    if (visited.has(node)) continue;          // a node can be pushed twice before it's processed
     visited.add(node);
     for (const next of adj.get(node) ?? []) {
-      if (!visited.has(next)) stack.«2»(next);
+      if (!visited.has(next)) stack.push(next);
     }
   }
   return visited;
 }`,
-  blanks: [
-    { choices: ['pop', 'shift', 'unshift', 'at'], answer: 0 },
-    { choices: ['continue', 'break', 'return visited', 'return'], answer: 0 },
-    { choices: ['push', 'unshift', 'add', 'shift'], answer: 0 }
-  ],
-  explain: '<p><code>pop</code> takes the <em>most recently</em> pushed node — that is what makes it depth-first. Swap <code>pop</code> for <code>shift</code> and you have BFS (next section). Checking <code>visited</code> after popping (not only before pushing) handles the case where a node was pushed twice before being processed.</p>'
+  explain: '<p><code>pop</code> takes the most recently pushed node — that is what makes it depth-first. Swap <code>pop</code> for <code>shift</code> and you have BFS. Checking <code>visited</code> after popping (not only before pushing) handles a node pushed twice before being processed. The 3,000-chain would overflow a naive recursive version’s stack in some engines — this one can’t.</p>'
 })}
 
 <h2>Exercise 3.1</h2>
@@ -360,27 +415,54 @@ ${widget('trace', {
 <h2>The visited-timing rule</h2>
 ${callout('key', 'Mark nodes visited when you ENQUEUE them, not when you dequeue them', `<p>Invariant: <em>every node in the queue has been discovered exactly once.</em> If you mark on dequeue, the same node can be pushed several times by different neighbors before it’s processed — still correct for reachability, but it inflates the queue, breaks the “first discovery = shortest” argument for path reconstruction, and on dense graphs blows up the work.</p>`)}
 
-${widget('spotbug', {
-  label: 'Spot the bug',
-  q: 'This BFS returns the shortest hop count. It gives the right number but does far too much work on dense graphs and can enqueue the same node many times. Click the line that is in the wrong place.',
-  name: 'shortestHops.js',
-  code: `
-function shortestHops(adj, start, target) {
+${widget('breakit', {
+  label: 'Break it — this “shortest path” is not',
+  q: 'A colleague wrote <code>shortestPath</code> with DFS and swears it works — it passed their three tests. It returns <em>a</em> path from <code>source</code> to <code>destination</code>, or <code>null</code>. Construct edges + source + destination for which it returns a path that is <strong>longer than the shortest one</strong>.',
+  fn: 'shortestPath',
+  name: 'shortestPath.js — DFS',
+  buggy: `
+function shortestPath(edges, source, destination) {
+  const adj = new Map();
+  for (const [a, b] of edges) {
+    if (!adj.has(a)) adj.set(a, []);
+    adj.get(a).push(b);
+  }
   const visited = new Set();
-  const queue = [[start, 0]];
-  while (queue.length) {
-    const [node, dist] = queue.shift();
-    if (node === target) return dist;
+  function dfs(node, path) {
+    if (node === destination) return path;
+    if (visited.has(node)) return null;
     visited.add(node);
     for (const next of adj.get(node) ?? []) {
-      if (!visited.has(next)) queue.push([next, dist + 1]);
+      const found = dfs(next, [...path, next]);
+      if (found) return found;
     }
+    return null;
   }
-  return -1;
+  return dfs(source, [source]);
 }`,
-  bugLine: 7,
-  hint: 'When does a node get marked — as it enters the queue, or as it leaves?',
-  explain: '<p>Marking on dequeue (line 7) means a node can sit in the queue several times. Mark on <em>enqueue</em> instead: <code>visited.add(start)</code> before the loop, and inside the loop <code>if (!visited.has(next)) { visited.add(next); queue.push(…) }</code>. Same result, tight queue, and the parent-map trick in the next exercise depends on it.</p>'
+  solution: `
+function shortestPath(edges, source, destination) {
+  const adj = new Map();
+  for (const [a, b] of edges) { if (!adj.has(a)) adj.set(a, []); adj.get(a).push(b); }
+  const parent = new Map(), visited = new Set([source]), queue = [source];
+  while (queue.length) {
+    const node = queue.shift();
+    if (node === destination) { const p = []; for (let c = node; c !== undefined; c = parent.get(c)) p.push(c); return p.reverse(); }
+    for (const next of adj.get(node) ?? []) if (!visited.has(next)) { visited.add(next); parent.set(next, node); queue.push(next); }
+  }
+  return null;
+}`,
+  harness: () => ({}),
+  argsTemplate: `
+[
+  [["A", "B"], ["B", "C"]],   // edges
+  "A",                        // source
+  "C"                         // destination
+]`,
+  sampleBreak: [[['A', 'B'], ['B', 'C'], ['A', 'C']], 'A', 'C'],
+  sampleOk: [[[['A', 'B'], ['B', 'C']], 'A', 'C'], [[['A', 'B']], 'B', 'A']],
+  hint: 'DFS commits to the <em>first</em> neighbor listed. Give the source a long route listed first and a direct edge listed second.',
+  explain: '<p>DFS explores the first neighbor to exhaustion before trying the second, so any graph where the longer route is listed first breaks it. Note that the returned path is <em>valid</em> — just not shortest — which is why the author’s tests passed: they only checked that a path came back. When the requirement says “shortest”, your tests must include a graph with two routes of different lengths.</p>'
 })}
 
 <h2>Reconstructing the actual path</h2>
@@ -417,7 +499,9 @@ shortestTransferPath(transfers, "A", "F")   // ["A", "B", "C", "F"]  (A→D→E�
     { cat: 'edge', q: 'When should a node be marked visited?', choices: ['When dequeued', 'When enqueued (discovered) — so each node is queued exactly once and its recorded parent is the shortest-route one', 'At the end', 'Only if it’s the destination'], answer: 1,
       explain: '<p>If you mark on dequeue, a later, longer discovery could overwrite the parent recorded by the shortest one (unless you guard). Mark-on-enqueue makes the invariant simple.</p>' },
     { cat: 'complexity', q: 'Complexity?', choices: ['O(V + E) time, O(V) extra for queue/visited/parent', 'O(V²)', 'O(E log V)', 'O(V · E)'], answer: 0,
-      explain: '<p>Same as any traversal. Path reconstruction adds O(path length) ≤ O(V).</p>' }
+      explain: '<p>Same as any traversal. Path reconstruction adds O(path length) ≤ O(V).</p>' },
+    { type: 'text', cat: 'explanation', q: 'Explain why BFS gives the shortest chain and how you recover the path — as you would to the interviewer.', min: 50,
+      model: '<p>“BFS explores accounts in order of hop distance, so the first time the destination is discovered it’s via a route with the fewest hops. I mark nodes visited when I enqueue them and record each node’s parent at that moment; when I dequeue the destination I walk the parent map back to the source and reverse. O(V + E) time, O(V) extra space.”</p>' }
   ],
   starter: `
 function shortestTransferPath(transfers, source, destination) {
@@ -521,6 +605,15 @@ dfs(node):
 
 run dfs from every unseen node (the graph may be disconnected)`)}
 
+<h2>Trace it — the diamond and the real cycle in one graph</h2>
+${widget('trace', {
+  algo: 'cycle',
+  graph: { A: ['B', 'C'], B: ['D'], C: ['D', 'E'], D: [], E: ['A'] },
+  start: 'A',
+  pos: { A: [50, 110], B: [170, 45], C: [170, 175], D: [300, 45], E: [300, 175] },
+  explain: '<p>The step that matters: from C, the first neighbor D is already <em>done</em> (green) — that is the diamond, and it is <strong>skipped</strong>, not reported. Then E’s edge back to A finds A still <em>exploring</em> (dashed grey, on the stack) — that is a real cycle. A single visited set can’t tell those two situations apart.</p>'
+})}
+
 <p>With two Sets instead of a state map: <code>visiting</code> (grey) and <code>visited</code> (black). A neighbor in <code>visiting</code> = cycle; a neighbor in <code>visited</code> = skip; else recurse. Remember to move the node from <code>visiting</code> to <code>visited</code> when its recursion returns.</p>
 
 ${widget('mcq', {
@@ -553,7 +646,21 @@ hasCycle([["api", "database"], ["api", "cache"]])                           // f
     { cat: 'edge', q: 'The graph has two separate components and the cycle is in the second one. What must your code do?', choices: ['Nothing special; DFS finds it', 'Start a DFS from <em>every</em> node that is still unseen, not just the first one', 'Sort the nodes first', 'Return false; disconnected graphs can’t have cycles'], answer: 1,
       explain: '<p>A traversal from one start node only explores its component. Loop over all nodes and launch DFS from each unseen one.</p>' },
     { cat: 'complexity', q: 'Complexity?', choices: ['O(V + E)', 'O(V²)', 'O(V · E)', 'O(E log E)'], answer: 0,
-      explain: '<p>Each node enters “exploring” once and “done” once; each edge is examined once.</p>' }
+      explain: '<p>Each node enters “exploring” once and “done” once; each edge is examined once.</p>' },
+    { type: 'text', cat: 'explanation', q: 'Explain the three-color idea in two or three sentences, including why a single visited set is wrong.', min: 50,
+      model: '<p>“I run DFS keeping each node in one of three states: unseen, exploring (on the current recursion stack) and done. Reaching an <em>exploring</em> node means a back edge — a cycle. Reaching a <em>done</em> node is fine: in a diamond A→B→D, A→C→D, D is reached twice with no cycle, which is exactly what a single visited set would get wrong. I start a DFS from every unseen node so disconnected components are covered. O(V + E).”</p>' }
+  ],
+  ownTests: true,
+  ownTemplate: `
+[
+  { name: 'two-node cycle', args: [[['a', 'b'], ['b', 'a']]], expect: true },
+  // add at least two more — a diamond (no cycle!), a cycle in a second component, empty…
+]`,
+  coverage: [
+    { label: 'no cycle (n ≥ 2 edges)', hit: args => { const d = args[0]; if (!Array.isArray(d) || d.length < 2) return false; const adj = new Map(); for (const [a, b] of d) { if (!adj.has(a)) adj.set(a, []); if (!adj.has(b)) adj.set(b, []); adj.get(a).push(b); } const st = new Map(); let cyc = false; const dfs = n => { st.set(n, 1); for (const x of adj.get(n)) { if (st.get(x) === 1) cyc = true; else if (!st.has(x)) dfs(x); } st.set(n, 2); }; for (const n of adj.keys()) if (!st.has(n)) dfs(n); return !cyc; } },
+    { label: 'diamond / shared node without a cycle', hit: args => { const d = args[0]; if (!Array.isArray(d)) return false; const indeg = new Map(); for (const [, b] of d) indeg.set(b, (indeg.get(b) || 0) + 1); if (![...indeg.values()].some(v => v >= 2)) return false; const adj = new Map(); for (const [a, b] of d) { if (!adj.has(a)) adj.set(a, []); if (!adj.has(b)) adj.set(b, []); adj.get(a).push(b); } const st = new Map(); let cyc = false; const dfs = n => { st.set(n, 1); for (const x of adj.get(n)) { if (st.get(x) === 1) cyc = true; else if (!st.has(x)) dfs(x); } st.set(n, 2); }; for (const n of adj.keys()) if (!st.has(n)) dfs(n); return !cyc; } },
+    { label: 'cycle in a component other than the first', hit: args => { const d = args[0]; if (!Array.isArray(d) || !d.length) return false; const adj = new Map(); for (const [a, b] of d) { if (!adj.has(a)) adj.set(a, []); if (!adj.has(b)) adj.set(b, []); adj.get(a).push(b); } const cycFrom = start => { const st = new Map(); let cyc = false; const dfs = n => { st.set(n, 1); for (const x of adj.get(n)) { if (st.get(x) === 1) cyc = true; else if (!st.has(x)) dfs(x); } st.set(n, 2); }; dfs(start); return cyc; }; const first = d[0][0]; return !cycFrom(first) && [...adj.keys()].some(n => cycFrom(n)); } },
+    { label: 'empty input', hit: args => Array.isArray(args[0]) && args[0].length === 0 }
   ],
   starter: `
 function hasCycle(dependencies) {
@@ -662,7 +769,21 @@ ${code('js', 'example', `canExit([
     { cat: 'algorithm', q: 'BFS or DFS for “is the exit reachable?”', choices: ['Only BFS works on grids', 'Either — it’s existence; BFS would additionally give the fewest steps', 'Only DFS works on grids', 'Dijkstra'], answer: 1,
       explain: '<p>Existence → either. If the follow-up is “fewest moves”, you’ll want BFS, so many people default to BFS on grids.</p>' },
     { cat: 'complexity', q: 'Complexity for an R × C grid?', choices: ['O(R · C) — each cell visited once, 4 edges each', 'O(R + C)', 'O((R·C)²)', 'O(R · C · log(R · C))'], answer: 0,
-      explain: '<p>V = R·C cells, E ≤ 4V, so O(V + E) = O(R·C).</p>' }
+      explain: '<p>V = R·C cells, E ≤ 4V, so O(V + E) = O(R·C).</p>' },
+    { type: 'text', cat: 'explanation', q: 'Describe the grid as a graph and your traversal, in two sentences.', min: 40,
+      model: '<p>“Each open cell is a node and its four in-bounds, non-wall neighbors are its edges, computed on the fly from coordinates rather than stored. I BFS from S with a visited set keyed by ‘row,col’ strings, marking on enqueue, and return true the moment I dequeue E — O(R·C) time and space.”</p>' }
+  ],
+  ownTests: true,
+  ownTemplate: `
+[
+  { name: 'adjacent', args: [['SE']], expect: true },
+  // add at least two more — walled off, must go around, no diagonal shortcut…
+]`,
+  coverage: [
+    { label: 'unreachable exit', hit: args => { const g = args[0]; if (!Array.isArray(g) || !g.length) return false; const R = g.length, C = g[0].length; let s = null; for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) if (g[r][c] === 'S') s = [r, c]; if (!s) return false; const seen = new Set([s.join()]), q = [s]; while (q.length) { const [r, c] = q.shift(); if (g[r][c] === 'E') return false; for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nr = r + dr, nc = c + dc; if (nr < 0 || nr >= R || nc < 0 || nc >= C || g[nr][nc] === '#' || seen.has(nr + ',' + nc)) continue; seen.add(nr + ',' + nc); q.push([nr, nc]); } } return true; } },
+    { label: 'path must go around a wall', hit: args => { const g = args[0]; return Array.isArray(g) && g.some(row => row.includes('#')) && g.length > 1; } },
+    { label: 'diagonal-only adjacency (must be false)', hit: args => { const g = args[0]; if (!Array.isArray(g) || g.length < 2) return false; const R = g.length, C = g[0].length; for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) if (g[r][c] === 'S') for (const [dr, dc] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { const nr = r + dr, nc = c + dc; if (nr >= 0 && nr < R && nc >= 0 && nc < C && g[nr][nc] === 'E') return true; } return false; } },
+    { label: 'single row or column', hit: args => Array.isArray(args[0]) && (args[0].length === 1 || (args[0][0] && args[0][0].length === 1)) }
   ],
   starter: `
 function canExit(grid) {
@@ -730,6 +851,118 @@ function canExit(grid) {
       },
 
       /* ------------------------------------------------ 3.7 ------ */
+      {
+        type: 'read',
+        title: 'Undirected graphs & connected components',
+        minutes: 7,
+        html: `
+<p>“How many separate clusters of linked accounts are there?”, “are these two users in the same friend group?”, “how many islands?” — all the same question: <strong>count the connected components</strong>. The traversal is the one you already have; the new habits are (1) undirected edges go in <em>both</em> directions, and (2) you run the traversal from every not-yet-visited node and count how many times you had to start.</p>
+
+${diagram(`
+components = 0
+visited = Set
+for each node:
+    if node not in visited:
+        components += 1          ← a new start = a new component
+        traverse(node)           ← DFS/BFS marks everything reachable`)}
+
+${widget('mcq', {
+  label: 'Both directions',
+  q: 'Links are given as <code>["A","B"]</code> meaning A and B are linked (symmetric). You build <code>adj</code> by pushing only <code>B</code> onto <code>A</code>’s list. What goes wrong?',
+  choices: ['Nothing — traversal handles it', 'Starting from B you can’t reach A, so A and B may be counted as two components', 'The graph gets a cycle', 'Memory doubles'],
+  answer: 1,
+  explain: '<p>An undirected edge is two directed edges. Forgetting the mirror is the classic bug here: the count comes out too high, but only for some inputs, so it slips past a weak test.</p>'
+})}
+
+${widget('exercise', {
+  id: 'ex-3-5',
+  title: 'countClusters(accounts, links)',
+  time: 7,
+  fn: 'countClusters',
+  prompt: `<p><code>accounts</code> is a list of IDs; <code>links</code> is a list of <code>[a, b]</code> pairs meaning the two accounts are linked (symmetric). Return the number of clusters — groups of accounts connected directly or indirectly. An account with no links is its own cluster.</p>
+${code('js', 'example', `countClusters(["A", "B", "C", "D", "E"], [["A", "B"], ["B", "C"], ["D", "E"]])   // 2
+countClusters(["A", "B", "C"], [])                                              // 3`)}`,
+  reasoning: [
+    { cat: 'abstraction', q: 'What is a cluster in graph terms?', choices: ['A cycle', 'A connected component of an undirected graph', 'A shortest path', 'A node with the most edges'], answer: 1,
+      explain: '<p>Linked directly or indirectly = reachable = same component.</p>' },
+    { cat: 'algorithm', q: 'How do you count components?', choices: ['Count the edges and subtract', 'Loop over all accounts; each time you find an unvisited one, increment the count and traverse (DFS/BFS) to mark its whole component', 'BFS from the first account only', 'Sort the links'], answer: 1,
+      explain: '<p>The number of traversals you had to <em>start</em> is the number of components.</p>' },
+    { cat: 'edge', q: 'An account appears in <code>accounts</code> but in no link. What must happen?', choices: ['Ignore it', 'It counts as a cluster of one — so iterate over <code>accounts</code>, not over the keys of the adjacency list', 'Throw', 'Merge it into the first cluster'], answer: 1,
+      explain: '<p>Iterating only over nodes that appear in links silently drops isolated accounts. Iterate the account list.</p>' },
+    { type: 'text', cat: 'explanation', q: 'Explain your approach in two sentences.', min: 40,
+      model: '<p>“I build an undirected adjacency list by adding each link in both directions, then loop over every account: whenever I meet one that isn’t visited yet I increment the cluster count and DFS from it, marking everything reachable. O(A + L) for A accounts and L links.”</p>' }
+  ],
+  starter: `
+function countClusters(accounts, links) {
+  // undirected adjacency list (both directions), then count traversal starts
+}`,
+  tests: [
+    { name: 'example — two clusters', args: [['A', 'B', 'C', 'D', 'E'], [['A', 'B'], ['B', 'C'], ['D', 'E']]], expect: 2 },
+    { name: 'no links → every account alone', args: [['A', 'B', 'C'], []], expect: 3 },
+    { name: 'no accounts', args: [[], []], expect: 0 },
+    { name: 'one big cluster', args: [['A', 'B', 'C', 'D'], [['A', 'B'], ['B', 'C'], ['C', 'D']]], expect: 1 },
+    { name: 'links must work in both directions (only reachable backwards)', args: [['A', 'B', 'C'], [['B', 'A'], ['C', 'B']]], expect: 1 },
+    { name: 'isolated account plus a cluster', args: [['A', 'B', 'Z'], [['A', 'B']]], expect: 2 },
+    { name: 'cycle inside a cluster', args: [['A', 'B', 'C', 'D'], [['A', 'B'], ['B', 'C'], ['C', 'A']]], expect: 2 },
+    { name: 'duplicate links', args: [['A', 'B'], [['A', 'B'], ['A', 'B'], ['B', 'A']]], expect: 1 },
+    { name: 'many small clusters (500 pairs)', args: [Array.from({ length: 1000 }, (_, i) => 'u' + i), Array.from({ length: 500 }, (_, i) => ['u' + (2 * i), 'u' + (2 * i + 1)])], expect: 500 }
+  ],
+  antiSolutions: [
+    { name: 'directed adjacency (forgets the mirror edge)', code: 'function countClusters(acc, links) { const adj = new Map(); for (const [a, b] of links) { if (!adj.has(a)) adj.set(a, []); adj.get(a).push(b); } const seen = new Set(); let n = 0; for (const a of acc) { if (seen.has(a)) continue; n++; const st = [a]; while (st.length) { const x = st.pop(); if (seen.has(x)) continue; seen.add(x); for (const y of adj.get(x) ?? []) st.push(y); } } return n; }' },
+    { name: 'iterates adjacency keys, drops isolated accounts', code: 'function countClusters(acc, links) { const adj = new Map(); for (const [a, b] of links) { if (!adj.has(a)) adj.set(a, []); if (!adj.has(b)) adj.set(b, []); adj.get(a).push(b); adj.get(b).push(a); } const seen = new Set(); let n = 0; for (const a of adj.keys()) { if (seen.has(a)) continue; n++; const st = [a]; while (st.length) { const x = st.pop(); if (seen.has(x)) continue; seen.add(x); for (const y of adj.get(x) ?? []) st.push(y); } } return n; }' }
+  ],
+  ownTests: true,
+  ownTemplate: `
+[
+  { name: 'two pairs', args: [['A', 'B', 'C', 'D'], [['A', 'B'], ['C', 'D']]], expect: 2 },
+  // add at least two more — an isolated account, a link given "backwards", no links…
+]`,
+  coverage: [
+    { label: 'isolated account', hit: args => { const [acc, links] = args; if (!Array.isArray(acc) || !Array.isArray(links)) return false; const linked = new Set(links.flat()); return acc.some(a => !linked.has(a)); } },
+    { label: 'no links', hit: args => Array.isArray(args[1]) && args[1].length === 0 && Array.isArray(args[0]) && args[0].length > 0 },
+    { label: 'link direction would matter if directed', hit: args => { const [acc, links] = args; if (!Array.isArray(acc) || !Array.isArray(links)) return false; const count = (mirror) => { const adj = new Map(); for (const [a, b] of links) { if (!adj.has(a)) adj.set(a, []); if (!adj.has(b)) adj.set(b, []); adj.get(a).push(b); if (mirror) adj.get(b).push(a); } const seen = new Set(); let n = 0; for (const a of acc) { if (seen.has(a)) continue; n++; const st = [a]; while (st.length) { const x = st.pop(); if (seen.has(x)) continue; seen.add(x); for (const y of adj.get(x) ?? []) st.push(y); } } return n; }; return count(true) !== count(false); } },
+    { label: 'cluster of 3+ accounts', hit: args => { const [acc, links] = args; if (!Array.isArray(acc) || !Array.isArray(links)) return false; const adj = new Map(); for (const [a, b] of links) { if (!adj.has(a)) adj.set(a, []); if (!adj.has(b)) adj.set(b, []); adj.get(a).push(b); adj.get(b).push(a); } const seen = new Set(); for (const a of acc) { if (seen.has(a)) continue; let size = 0; const st = [a]; while (st.length) { const x = st.pop(); if (seen.has(x)) continue; seen.add(x); size++; for (const y of adj.get(x) ?? []) st.push(y); } if (size >= 3) return true; } return false; } }
+  ],
+  hints: [
+    '<p>For each <code>[a, b]</code> push <code>b</code> onto <code>a</code>’s list <em>and</em> <code>a</code> onto <code>b</code>’s.</p>',
+    '<p>Loop over <code>accounts</code>: if not visited → <code>count++</code> and run a DFS/BFS that marks the component.</p>'
+  ],
+  solution: `
+function countClusters(accounts, links) {
+  const adj = new Map();
+  for (const [a, b] of links) {
+    if (!adj.has(a)) adj.set(a, []);
+    if (!adj.has(b)) adj.set(b, []);
+    adj.get(a).push(b);
+    adj.get(b).push(a);                       // undirected: both directions
+  }
+  const visited = new Set();
+  let clusters = 0;
+  for (const account of accounts) {           // iterate accounts, not adj keys → isolated ones count
+    if (visited.has(account)) continue;
+    clusters++;
+    const stack = [account];
+    while (stack.length) {
+      const node = stack.pop();
+      if (visited.has(node)) continue;
+      visited.add(node);
+      for (const next of adj.get(node) ?? []) if (!visited.has(next)) stack.push(next);
+    }
+  }
+  return clusters;
+}`,
+  solutionExplain: '<p>The same loop with a counter per traversal gives cluster <em>sizes</em>; with a label per node it answers “are X and Y in the same cluster?” in O(1) afterwards. Union-Find is the other standard tool here — mention it if the interviewer asks about links arriving over time.</p>',
+  complexity: '<p>“O(A + L) time and space for A accounts and L links — every account and every link is touched once.”</p>',
+  followUp: {
+    q: 'Follow-up: “Return the <em>size of the largest</em> cluster.” Change?',
+    choices: ['Sort the accounts', 'Count nodes inside each traversal and keep the max', 'Run BFS from every node', 'Use a heap of clusters'], answer: 1,
+    explain: '<p>The traversal already visits exactly one component; count as you mark. Output changes, algorithm doesn’t.</p>'
+  }
+})}
+`
+      },
+
+      /* ------------------------------------------------ 3.8 ------ */
       {
         type: 'quiz',
         title: 'Quiz: graph traversal',

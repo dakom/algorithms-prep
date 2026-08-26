@@ -393,3 +393,24 @@ button.mini { padding: 5px 12px; font-size: 13px; }
 .loop-steps li strong { display: block; color: var(--text-bright); }
 .say-it { font-style: italic; color: var(--text-dim); border-left: 3px solid var(--amber); padding: 4px 12px; margin: 8px 0 14px; }
 .big-quote { font-size: 18px; font-weight: 600; color: var(--text-bright); padding: 12px 18px; background: var(--bg-raised); border-radius: var(--radius); margin-bottom: 16px; }
+
+/* ---------- v2: katas, break-it, cycle trace, redo, weak spots ---------- */
+.g-node.exploring circle { fill: var(--bg-raised); stroke: var(--text-dim); stroke-dasharray: 4 3; stroke-width: 2.5; }
+.trace-choice.wide { width: auto; border-radius: 20px; padding: 0 14px; font-size: 13.5px; font-weight: 600; }
+.trace-choices .trace-choice.wide { height: 36px; }
+.ex-attempts { font-size: 13px; color: var(--text-dim); margin-top: 8px; }
+.ex-attempt { display: inline-block; font-family: var(--mono); font-size: 12.5px; background: var(--bg-raised); padding: 2px 8px; border-radius: 5px; margin-right: 4px; color: var(--text); }
+.ex-attempt-n { font-family: var(--mono); font-size: 11px; color: var(--text-dim); background: var(--bg-raised); padding: 0 5px; border-radius: 4px; margin-left: 4px; }
+.ex-status.redo { color: var(--amber); background: var(--amber-dim); border-color: transparent; }
+.ex-board-row.due { grid-template-columns: 96px 1fr 40px 1fr; }
+.ex-board-why { font-size: 12px; color: var(--text-dim); text-align: right; }
+.weak-spots { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-alt); padding: 12px 16px; margin-bottom: 8px; }
+.weak-row { display: grid; grid-template-columns: 190px 1fr 48px; gap: 12px; align-items: center; font-size: 13.5px; padding: 4px 0; }
+.weak-row .ex-score-bar { height: 9px; }
+.weak-row .ex-score-bar span.good { background: var(--green); } .weak-row .ex-score-bar span.ok { background: var(--amber); } .weak-row .ex-score-bar span.low { background: var(--red); }
+.weak-pct { text-align: right; font-family: var(--mono); font-size: 12px; }
+.widget-kata .ex-results, .widget-breakit .ex-results { margin-top: 8px; }
+.widget-kata .ex-solution { margin-top: 10px; }
+.widget-kata .ex-hints { margin: 8px 0 0; }
+@media (max-width: 700px) { .ex-board-row.due { grid-template-columns: 90px 1fr; } .ex-board-row.due .ex-board-mod, .ex-board-row.due .ex-board-why { display: none; } .weak-row { grid-template-columns: 120px 1fr 48px; } }
+.drill-code { font-family: var(--mono); font-size: 13px; font-weight: 500; white-space: pre; overflow-x: auto; background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 8px; padding: 10px 12px; line-height: 1.5; color: var(--text); }

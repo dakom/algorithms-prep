@@ -8,7 +8,7 @@
     '  const spec = e.data.spec;\n' +
     '  const emit = (index, result) => postMessage({ type: "result", index, result });\n' +
     '  let summary;\n' +
-    '  try { summary = e.data.mode === "own" ? RunnerCore.runOwn(spec, emit) : RunnerCore.runSuite(spec, emit); }\n' +
+    '  try { summary = e.data.mode === "own" ? RunnerCore.runOwn(spec, emit) : e.data.mode === "break" ? RunnerCore.runBreak(spec, emit) : RunnerCore.runSuite(spec, emit); }\n' +
     '  catch (err) { summary = { loadError: "internal runner error: " + (err && err.message) }; }\n' +
     '  postMessage({ type: "done", summary });\n' +
     '};';
@@ -63,8 +63,8 @@
         setTimeout(() => {
           let summary;
           try {
-            summary = job.mode === 'own'
-              ? RunnerCore.runOwn(spec, cb.onResult, { guard: true })
+            summary = job.mode === 'own' ? RunnerCore.runOwn(spec, cb.onResult, { guard: true })
+              : job.mode === 'break' ? RunnerCore.runBreak(spec, cb.onResult, { guard: true })
               : RunnerCore.runSuite(spec, cb.onResult, { guard: true });
           } catch (e) { summary = { loadError: 'runner error: ' + e.message }; }
           summary.fallback = true;

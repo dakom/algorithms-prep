@@ -76,7 +76,21 @@ ${code('js', 'example', `maxTransactionsInWindow([2, 1, 5, 1, 3, 2], 3)   // 9  
     { cat: 'abstraction', q: 'Which pattern?', choices: ['Sort + scan', 'Fixed-size sliding window: running sum, add the new element, subtract the one leaving', 'Heap of size k', 'Prefix sums with binary search'], answer: 1,
       explain: '<p>“k consecutive” is the trigger. Prefix sums also give O(n) — a fine alternative to mention.</p>' },
     { cat: 'complexity', q: 'Complexity of the window versus the naive approach?', choices: ['O(n) vs O(n · k)', 'O(n log n) vs O(n²)', 'Both O(n)', 'O(k) vs O(n)'], answer: 0,
-      explain: '<p>Each element enters the window once and leaves once.</p>' }
+      explain: '<p>Each element enters the window once and leaves once.</p>' },
+    { type: 'text', cat: 'explanation', q: 'Explain the slide in one or two sentences.', min: 25,
+      model: '<p>“I sum the first k values, then for each next index add the entering value and subtract the one that left k positions back, tracking the maximum. O(n) time, O(1) space.”</p>' }
+  ],
+  ownTests: true,
+  ownTemplate: `
+[
+  { name: 'k = 2', args: [[1, 3, 2], 2], expect: 5 },
+  // add at least two more — k equal to the length, k too large, best window at the end…
+]`,
+  coverage: [
+    { label: 'k > length or k = 0', hit: args => Array.isArray(args[0]) && (args[1] === 0 || args[1] > args[0].length) },
+    { label: 'best window at the very end', hit: args => { const [v, k] = args; if (!Array.isArray(v) || !(k > 0) || k > v.length) return false; let best = -Infinity, bi = 0, s = 0; for (let i = 0; i < v.length; i++) { s += v[i]; if (i >= k) s -= v[i - k]; if (i >= k - 1 && s > best) { best = s; bi = i; } } return bi === v.length - 1 && v.length > k; } },
+    { label: 'k equals the length', hit: args => Array.isArray(args[0]) && args[0].length > 0 && args[1] === args[0].length },
+    { label: 'negative values', hit: args => Array.isArray(args[0]) && args[0].some(x => x < 0) }
   ],
   starter: `
 function maxTransactionsInWindow(values, k) {
@@ -92,6 +106,7 @@ function maxTransactionsInWindow(values, k) {
     { name: 'best window at the very end', args: [[1, 1, 1, 1, 9, 9], 2], expect: 18 },
     { name: 'best window at the very start', args: [[9, 9, 1, 1, 1], 2], expect: 18 },
     { name: 'all zeros', args: [[0, 0, 0], 2], expect: 0 },
+    { name: 'negative values (refunds)', args: [[5, -2, 3, -1], 2], expect: 3 },
     { name: 'long input (10,000)', args: [Array.from({ length: 10000 }, (_, i) => i % 7), 7], expect: 21 }
   ],
   antiSolutions: [
@@ -155,7 +170,21 @@ lowerBound([1, 3, 3, 5, 8], 9)    // 5   (none)`)}`,
     { cat: 'algorithm', q: 'When <code>a[mid] &gt;= target</code>, what do you do with <code>mid</code>?', choices: ['Exclude it: <code>hi = mid - 1</code>', 'Keep it as a candidate: <code>hi = mid</code> — the answer could be mid or something to its left', 'Return mid', 'Set <code>lo = mid</code>'], answer: 1,
       explain: '<p>The boundary form keeps the candidate. Excluding it is the off-by-one that returns the wrong index on duplicates.</p>' },
     { cat: 'edge', q: 'Why does the loop <code>while (lo &lt; hi)</code> with <code>lo = mid + 1</code> / <code>hi = mid</code> always terminate?', choices: ['Because mid is random', 'Each iteration strictly shrinks the range: either lo moves past mid, or hi moves down to mid (and mid &lt; hi because mid rounds down)', 'It doesn’t on empty arrays', 'Because of the return inside'], answer: 1,
-      explain: '<p>Say it: “the interval strictly shrinks every iteration, and lo === hi is the answer.” That is the correctness argument.</p>' }
+      explain: '<p>Say it: “the interval strictly shrinks every iteration, and lo === hi is the answer.” That is the correctness argument.</p>' },
+    { type: 'text', cat: 'explanation', q: 'State the invariant your two pointers maintain.', min: 25,
+      model: '<p>“Everything left of <code>lo</code> is smaller than the target, and <code>hi</code> and everything right of it is at least the target — so the answer is always inside [lo, hi], and when they meet that index is the first element ≥ target.”</p>' }
+  ],
+  ownTests: true,
+  ownTemplate: `
+[
+  { name: 'found in the middle', args: [[1, 4, 9], 4], expect: 1 },
+  // add at least two more — duplicates, larger than everything, empty array…
+]`,
+  coverage: [
+    { label: 'duplicates of the target', hit: args => Array.isArray(args[0]) && args[0].filter(x => x === args[1]).length >= 2 },
+    { label: 'target larger than every element', hit: args => Array.isArray(args[0]) && args[0].length > 0 && args[0].every(x => x < args[1]) },
+    { label: 'empty array', hit: args => Array.isArray(args[0]) && args[0].length === 0 },
+    { label: 'target absent, insertion point inside', hit: args => Array.isArray(args[0]) && !args[0].includes(args[1]) && args[0].some(x => x < args[1]) && args[0].some(x => x > args[1]) }
   ],
   starter: `
 function lowerBound(sorted, target) {

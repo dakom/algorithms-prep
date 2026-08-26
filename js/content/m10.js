@@ -115,6 +115,39 @@ ${widget('drill', {
 
       /* ------------------------------------------------ 10.3 ------ */
       {
+        type: 'drill',
+        title: 'Complexity drill: read the code, name the Big-O',
+        minutes: 5,
+        html: `
+<p>“Estimate complexity” is a rubric line in every exercise. This drill trains it directly: a short snippet, 20 seconds, name the time complexity. Assume <code>n</code> is the input size, <code>k</code> a small parameter, and Map/Set operations are O(1).</p>
+
+${widget('drill', {
+  label: 'Complexity drill',
+  q: 'What is the time complexity?',
+  seconds: 20,
+  choices: ['O(1)', 'O(log n)', 'O(n)', 'O(n log n)', 'O(n²)', 'O(V + E)', 'O(n log k)'],
+  items: [
+    { prompt: '<pre class="drill-code">const seen = new Set();\nfor (const id of ids) {\n  if (seen.has(id)) return true;\n  seen.add(id);\n}\nreturn false;</pre>', answer: 'O(n)', explain: 'One pass, O(1) per element.' },
+    { prompt: '<pre class="drill-code">for (let i = 0; i < a.length; i++)\n  for (let j = i + 1; j < a.length; j++)\n    if (a[i] + a[j] === target) return [i, j];</pre>', answer: 'O(n²)', explain: 'Every pair.' },
+    { prompt: '<pre class="drill-code">const sorted = [...intervals].sort((x, y) => x[0] - y[0]);\nfor (let i = 1; i < sorted.length; i++)\n  if (sorted[i][0] < sorted[i - 1][1]) return true;</pre>', answer: 'O(n log n)', explain: 'The sort dominates the linear scan.' },
+    { prompt: '<pre class="drill-code">while (queue.length) {\n  const node = queue.shift();\n  for (const next of adj.get(node) ?? [])\n    if (!visited.has(next)) { visited.add(next); queue.push(next); }\n}</pre>', answer: 'O(V + E)', explain: 'Each node dequeued once, each edge scanned once (ignoring shift’s cost).' },
+    { prompt: '<pre class="drill-code">let lo = 0, hi = a.length;\nwhile (lo < hi) {\n  const mid = (lo + hi) >> 1;\n  if (a[mid] >= t) hi = mid; else lo = mid + 1;\n}</pre>', answer: 'O(log n)', explain: 'Halves the range each step.' },
+    { prompt: '<pre class="drill-code">for (const [acct, total] of totals) {\n  heap.push([acct, total]);\n  if (heap.size > k) heap.pop();\n}</pre>', answer: 'O(n log k)', explain: 'n pushes/pops on a heap that never exceeds k.' },
+    { prompt: '<pre class="drill-code">return balances.get(accountId) ?? 0;</pre>', answer: 'O(1)', explain: 'A single hash lookup.' },
+    { prompt: '<pre class="drill-code">for (const tx of transactions) {\n  if (frozen.includes(tx.account)) flagged.push(tx);\n}</pre>', answer: 'O(n²)', explain: '<code>includes</code> is a linear scan inside a linear loop — O(n·m), quadratic in the worst case. Index <code>frozen</code> in a Set first.' },
+    { prompt: '<pre class="drill-code">function depth(node) {\n  if (!node) return 0;\n  return 1 + Math.max(depth(node.left), depth(node.right));\n}</pre>', answer: 'O(n)', explain: 'Every node visited once.' },
+    { prompt: '<pre class="drill-code">let sum = 0;\nfor (let i = 0; i < k; i++) sum += v[i];\nfor (let i = k; i < v.length; i++) sum += v[i] - v[i - k];</pre>', answer: 'O(n)', explain: 'Sliding window: each element enters and leaves once.' },
+    { prompt: '<pre class="drill-code">const result = [];\nfor (const x of items) {\n  result.push(x);\n  result.sort((a, b) => a - b);\n}</pre>', answer: 'O(n²)', explain: 'Sorting inside the loop: n sorts of up to n elements is O(n² log n) — the closest listed answer, and clearly worse than sorting once at the end.' },
+    { prompt: '<pre class="drill-code">for (const [from, to] of edges) {\n  if (!adj.has(from)) adj.set(from, []);\n  adj.get(from).push(to);\n}</pre>', answer: 'O(V + E)', explain: 'Building the adjacency list touches each edge once (and creates up to V keys).' },
+    { prompt: '<pre class="drill-code">const totals = new Map();\nfor (const t of txs) totals.set(t.acct, (totals.get(t.acct) ?? 0) + t.amount);\nreturn [...totals].sort((a, b) => b[1] - a[1]).slice(0, k);</pre>', answer: 'O(n log n)', explain: 'O(n) aggregation plus an O(m log m) sort of the merchant totals; with m ≤ n that is O(n log n) — the heap version would be O(n log k).' },
+    { prompt: '<pre class="drill-code">const state = new Map();\nfunction dfs(u) {\n  state.set(u, 1);\n  for (const v of adj.get(u) ?? []) {\n    if (state.get(v) === 1) return true;\n    if (!state.has(v) && dfs(v)) return true;\n  }\n  state.set(u, 2); return false;\n}</pre>', answer: 'O(V + E)', explain: 'Three-color DFS: each node enters and finishes once, each edge examined once.' }
+  ]
+})}
+`
+      },
+
+      /* ------------------------------------------------ 10.4 ------ */
+      {
         type: 'project',
         title: 'Completion criteria',
         minutes: 3,

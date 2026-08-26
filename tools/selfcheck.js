@@ -82,6 +82,7 @@ for (const cfg of window.Exercise.all()) {
     }
     // 3. anti-solutions fail
     (stage.antiSolutions || []).forEach(a => {
+      if (a.expectTimeout) { console.log('  · anti "' + a.name + '": skipped (browser timeout)'); return; }
       const ra = runSuite(prelude + trim(a.code), fn, !!cfg.isClass, cfg.harness, stage.tests);
       if (!ra.summary.loadError && ra.summary.passed === ra.summary.total) fail('antiSolution "' + a.name + '" passes every test' + label);
       else { ok(); console.log('  · anti "' + a.name + '": ' + (ra.summary.loadError ? 'load error' : (ra.summary.total - ra.summary.passed) + ' failing') + (ra.results && ra.results.find(x => x && x.error && /infinite loop|call stack/.test(x.error)) ? ' (incl. loop/recursion guard)' : '')); }
@@ -140,6 +141,26 @@ Object.values(window.T._widgets).forEach(cfg => {
     if (!nodes.has(cfg.start)) fail('trace start not in graph');
   }
   else if (cfg.type === 'order') { if (!cfg.items || cfg.items.length < 2) fail('order widget with < 2 items'); else ok(); }
+  else if (cfg.type === 'kata') {
+    const prelude = cfg.prelude ? trim(cfg.prelude) + '\n\n' : '';
+    if (!cfg.solution || !cfg.tests || !cfg.tests.length) { fail('kata without solution/tests: ' + cfg.fn); return; }
+    const r = runSuite(prelude + trim(cfg.solution), cfg.fn, !!cfg.isClass, cfg.harness, cfg.tests);
+    if (r.summary.loadError || r.summary.passed !== r.summary.total) fail('kata "' + cfg.fn + '": reference fails\n' + describeFails(r.results || []) + (r.summary.loadError || '')); else ok();
+    const rs = runSuite(prelude + trim(cfg.starter || ''), cfg.fn, !!cfg.isClass, cfg.harness, cfg.tests);
+    if (!rs.summary.loadError && rs.summary.passed === rs.summary.total) fail('kata "' + cfg.fn + '": starter already passes'); else ok();
+    (cfg.antiSolutions || []).forEach(a => { if (a.expectTimeout) { console.log('  · kata ' + cfg.fn + ' anti "' + a.name + '": skipped (caught by the browser timeout, not by output)'); return; } const ra = runSuite(prelude + trim(a.code), cfg.fn, !!cfg.isClass, cfg.harness, cfg.tests); if (!ra.summary.loadError && ra.summary.passed === ra.summary.total) fail('kata "' + cfg.fn + '" anti "' + a.name + '" passes'); else ok(); });
+    console.log('  · kata ' + cfg.fn + (cfg.fix ? ' (fix-it)' : '') + ': ok');
+  }
+  else if (cfg.type === 'breakit') {
+    if (!cfg.sampleBreak) { fail('breakit "' + cfg.fn + '" needs sampleBreak (args known to expose the bug)'); return; }
+    const mk = argsSrc => { const spec = { refCode: trim(cfg.solution), buggyCode: trim(cfg.buggy), fn: cfg.fn, argsSrc }; if (cfg.harness) spec.harnessSrc = cfg.harness.toString(); const res = []; const sm = RunnerCore.runBreak(spec, (i, r) => { res[i] = r; }, { guard: true }); return { sm, res }; };
+    const b = mk(JSON.stringify(cfg.sampleBreak));
+    const buggyHung = b.res[1] && b.res[1].error && /infinite loop|call stack/.test(b.res[1].error);
+    if (b.sm.loadError) fail('breakit "' + cfg.fn + '": ' + b.sm.loadError);
+    else if (!b.sm.differ && !buggyHung) fail('breakit "' + cfg.fn + '": sampleBreak does not expose the bug (both → ' + (b.res[0] && b.res[0].actual) + ')'); else ok();
+    (cfg.sampleOk || []).forEach(args => { const o = mk(JSON.stringify(args)); if (o.sm.loadError || o.sm.differ) fail('breakit "' + cfg.fn + '": buggy version should AGREE on sampleOk ' + JSON.stringify(args)); else ok(); });
+    console.log('  · breakit ' + cfg.fn + ': ok' + (buggyHung ? ' (buggy hangs)' : ''));
+  }
   else if (cfg.type === 'exercise') { /* covered above */ }
   else ok();
 });

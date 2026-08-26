@@ -317,6 +317,25 @@
     const nodes = Object.keys(adj);
     Object.values(adj).flat().forEach(n => { if (!nodes.includes(n)) nodes.push(n); });
     const nb = n => adj[n] || [];
+    if (cfg.algo === 'cycle') {
+      // three-color DFS; every step is an EVENT: enter / finish / skip(done) / cycle(back edge)
+      const state = new Map(), stack = [];
+      const snap = (ev) => steps.push({ ev, exploring: stack.slice(), done: Array.from(state).filter(([, v]) => v === 2).map(([k]) => k), current: stack[stack.length - 1] || null });
+      let found = false;
+      const dfs = u => {
+        state.set(u, 1); stack.push(u); snap({ type: 'enter', node: u });
+        for (const v of nb(u)) {
+          if (found) return;
+          if (state.get(v) === 1) { snap({ type: 'cycle', from: u, to: v }); found = true; return; }
+          if (state.get(v) === 2) { snap({ type: 'skip', node: v }); continue; }
+          dfs(v);
+        }
+        if (found) return;
+        state.set(u, 2); stack.pop(); snap({ type: 'finish', node: u });
+      };
+      dfs(cfg.start);
+      return { steps, nodes, cycleMode: true };
+    }
     if (cfg.algo === 'bfs') {
       const queue = [cfg.start], visited = new Set([cfg.start]), order = [];
       while (queue.length) {
@@ -352,7 +371,11 @@
       if (!pos[n]) continue;
       const [x, y] = pos[n];
       let cls = 'g-node';
-      if (st) {
+      if (st && st.exploring) {
+        if (st.current === n && !done) cls += ' current';
+        else if (st.done.includes(n)) cls += ' visited';
+        else if (st.exploring.includes(n)) cls += ' exploring';
+      } else if (st) {
         if (st.current === n && !done) cls += ' current';
         else if (st.visited.includes(n)) cls += ' visited';
         else if (st.discovered.includes(n)) cls += ' frontier';
@@ -361,8 +384,50 @@
     }
     return s + '</svg>';
   }
+  function evLabel(ev) {
+    return ev.type === 'enter' ? 'enter ' + ev.node : ev.type === 'finish' ? 'finish ' + ev.node : ev.type === 'skip' ? 'skip ' + ev.node + ' (done)' : 'back edge → ' + ev.to + ' = CYCLE';
+  }
+  function renderCycleTrace(el, cfg, state, save, steps, nodes) {
+    const i = state.step || 0, done = i >= steps.length;
+    const st = i > 0 ? steps[i - 1] : { exploring: [], done: [], current: null };
+    let html = header(cfg.label || 'Predict the three-color DFS', done, '🔍');
+    html += '<div class="q-text">' + (cfg.q || 'Starting at <code>' + esc(cfg.start) + '</code>: what is the next <em>event</em>? Grey = exploring (on the stack), green = done. A back edge to a grey node is a cycle; reaching a green node is not.') + '</div>';
+    html += '<div class="trace-wrap"><div class="trace-graph">' + svgGraph(cfg, nodes, Object.assign({ visited: [], discovered: [] }, st), done) + '</div>';
+    html += '<div class="trace-state">' +
+      '<div class="trace-row"><span class="trace-lbl">adjacency</span><code>' + Object.keys(cfg.graph).map(u => esc(u) + ' → [' + cfg.graph[u].map(esc).join(', ') + ']').join('<br>') + '</code></div>' +
+      '<div class="trace-row"><span class="trace-lbl">exploring (stack, bottom → top)</span><code>' + (st.exploring.length ? st.exploring.map(esc).join(' › ') : '(empty)') + '</code></div>' +
+      '<div class="trace-row"><span class="trace-lbl">done</span><code>' + (st.done.length ? st.done.map(esc).join(', ') : '—') + '</code></div>' +
+      '<div class="trace-row"><span class="trace-lbl">events so far</span><code>' + (i ? steps.slice(0, i).map(s => esc(evLabel(s.ev))).join('<br>') : '—') + '</code></div></div></div>';
+    if (!done) {
+      const cur = st.current;
+      const opts = [];
+      nodes.filter(n => !st.exploring.includes(n) && !st.done.includes(n)).forEach(n => opts.push({ type: 'enter', node: n }));
+      if (cur) opts.push({ type: 'finish', node: cur });
+      st.done.forEach(n => opts.push({ type: 'skip', node: n }));
+      st.exploring.forEach(n => opts.push({ type: 'cycle', to: n }));
+      html += '<div class="trace-q">Next event?</div><div class="trace-choices">' + opts.map(o => '<button class="trace-choice wide" data-ev="' + esc(evLabel(o)) + '">' + esc(evLabel(o)) + '</button>').join('') + '</div>';
+      if (state.wrong) html += explainBox('<div class="verdict v-wrong">✗ Not “' + esc(state.wrong) + '”. DFS takes the current node’s neighbors in order: an unseen neighbor is entered; a grey (exploring) neighbor is a back edge = cycle; a green (done) neighbor is skipped; when the neighbors are exhausted the node is finished.</div>');
+      html += '<div class="widget-actions"><button class="ghost mini" data-act="show">Show me this step</button><span class="trace-mistakes">' + (state.mistakes ? state.mistakes + ' miss' + (state.mistakes > 1 ? 'es' : '') : '') + '</span></div>';
+    } else {
+      const last = steps[steps.length - 1].ev;
+      html += explainBox('<div class="verdict v-right">✓ ' + (last.type === 'cycle' ? 'Cycle found: ' + esc(last.from) + ' → ' + esc(last.to) + ' while ' + esc(last.to) + ' was still on the stack' : 'Traversal finished with no cycle') + (state.mistakes ? ' — ' + state.mistakes + ' miss' + (state.mistakes > 1 ? 'es' : '') : ' — flawless') + '</div>' + (cfg.explain || ''));
+      html += '<div class="widget-actions"><button class="ghost mini" data-act="reset">Replay</button></div>';
+    }
+    el.innerHTML = html;
+    el.querySelectorAll('.trace-choice').forEach(b => b.addEventListener('click', () => {
+      if (b.dataset.ev === evLabel(steps[i].ev)) { state.step = i + 1; delete state.wrong; if (state.step >= steps.length) state.solved = true; }
+      else { state.wrong = b.dataset.ev; state.mistakes = (state.mistakes || 0) + 1; }
+      save(); renderCycleTrace(el, cfg, state, save, steps, nodes);
+    }));
+    const show = el.querySelector('[data-act=show]');
+    if (show) show.addEventListener('click', () => { state.step = i + 1; state.mistakes = (state.mistakes || 0) + 1; delete state.wrong; if (state.step >= steps.length) state.solved = true; save(); renderCycleTrace(el, cfg, state, save, steps, nodes); });
+    const reset = el.querySelector('[data-act=reset]');
+    if (reset) reset.addEventListener('click', () => { state.step = 0; state.mistakes = 0; delete state.solved; save(); renderCycleTrace(el, cfg, state, save, steps, nodes); });
+  }
   function renderTrace(el, cfg, state, save) {
-    const { steps, nodes } = buildTrace(cfg);
+    const built = buildTrace(cfg);
+    if (built.cycleMode) return renderCycleTrace(el, cfg, state, save, built.steps, built.nodes);
+    const { steps, nodes } = built;
     const i = state.step || 0;             // number of steps revealed
     const done = i >= steps.length;
     const st = i > 0 ? steps[i - 1] : { current: null, frontier: [cfg.start], visited: [], discovered: [cfg.start], added: [] };
@@ -398,7 +463,116 @@
     if (reset) reset.addEventListener('click', () => { state.step = 0; state.mistakes = 0; delete state.solved; save(); renderTrace(el, cfg, state, save); });
   }
 
-  const RENDERERS = { mcq: renderMCQ, multi: renderMulti, order: renderOrder, blanks: renderBlanks, spotbug: renderSpotBug, repl: renderRepl, drill: renderDrill, trace: renderTrace };
+  /* ---------- kata: editor + tests, no reasoning gate. Also used as "fix-it"
+     (starter = buggy code) — the replacement for guessable blanks/spot-the-bug. ----------
+     cfg: { label, q, fn, starter, tests, hints, solution, solutionExplain, harness?, prelude?, fix?, isClass? } */
+  function renderKata(el, cfg, state, save) {
+    const code = state.code !== undefined ? state.code : window.T.trim(cfg.starter || '');
+    const hints = cfg.hints || [];
+    let html = header(cfg.label || (cfg.fix ? 'Fix it' : 'Write it'), state.solved, cfg.fix ? '🔧' : '⌨️');
+    if (cfg.q) html += '<div class="q-text">' + cfg.q + '</div>';
+    if (cfg.prelude) html += '<details class="ex-prelude"><summary>Provided code</summary>' + window.T.code('js', 'provided', cfg.prelude) + '</details>';
+    html += '<div class="ex-editor-wrap"><div class="codeblock-header"><span>' + esc(cfg.fn + (cfg.isClass ? ' (class)' : '()')) + (cfg.fix ? ' — buggy: find and fix it' : ' — your code') + '</span><span class="kbd-hint">⌘/Ctrl+Enter runs</span></div><div class="editor-host"></div></div>';
+    html += '<div class="widget-actions"><button class="primary mini" data-act="run">▶ Run tests</button>' +
+      (hints.length ? '<button class="ghost mini" data-act="hint">💡 Hint (' + (state.hints || 0) + '/' + hints.length + ')</button>' : '') +
+      '<button class="ghost mini" data-act="reset">Reset code</button></div>';
+    html += '<div class="ex-hints" data-hints>' + hints.slice(0, state.hints || 0).map((h, i) => '<div class="ex-hint"><span class="ex-hint-n">Hint ' + (i + 1) + '</span>' + h + '</div>').join('') + '</div>';
+    html += '<div class="ex-results" data-results></div><div data-after></div>';
+    el.innerHTML = html;
+    const ed = window.Editor.create(el.querySelector('.editor-host'), { value: code, minRows: 6, onChange: v => { state.code = v; save(); }, onRun: () => run() });
+    const resultsEl = el.querySelector('[data-results]'), afterEl = el.querySelector('[data-after]');
+    function paintAfter() {
+      if (!state.solved) { afterEl.innerHTML = ''; return; }
+      afterEl.innerHTML = explainBox('<div class="verdict v-right">✓ All tests pass</div>' + (cfg.explain || '')) +
+        (cfg.solution ? '<details class="ex-solution"><summary>Reference</summary>' + window.T.code('js', 'reference — ' + cfg.fn, cfg.solution) + (cfg.solutionExplain || '') + '</details>' : '');
+    }
+    if (state.lastResults) window.Exercise.paintResults(resultsEl, state.lastResults, cfg.tests, state.lastSummary);
+    paintAfter();
+    let running = false;
+    function run() {
+      if (running) return;
+      running = true;
+      const btn = el.querySelector('[data-act=run]'); btn.disabled = true; btn.textContent = '… running';
+      const results = [];
+      resultsEl.innerHTML = '<div class="ex-results-empty">Running…</div>';
+      const userCode = (cfg.prelude ? window.T.trim(cfg.prelude) + '\n\n' : '') + ed.value;
+      window.Runner.run({ mode: 'suite', spec: { code: userCode, fn: cfg.fn, isClass: !!cfg.isClass, harness: cfg.harness, tests: cfg.tests } }, {
+        onResult: (i, r) => { results[i] = r; },
+        onTimeout: i => { results[i] = { name: cfg.tests[i].name, timeout: true }; },
+        onDone: summary => {
+          running = false; btn.disabled = false; btn.textContent = '▶ Run tests';
+          for (let i = 0; i < cfg.tests.length; i++) if (!results[i]) results[i] = { name: cfg.tests[i].name, skipped: true };
+          state.lastResults = results; state.lastSummary = summary;
+          const allPass = !summary.loadError && !summary.timedOut && results.every(r => r.pass);
+          if (allPass && !state.solved) { state.solved = true; const head = el.querySelector('.widget-head'); if (head && !head.querySelector('.widget-solved')) head.insertAdjacentHTML('beforeend', '<span class="widget-solved">✓ solved</span>'); }
+          save();
+          window.Exercise.paintResults(resultsEl, results, cfg.tests, summary);
+          paintAfter();
+        }
+      });
+    }
+    el.querySelector('[data-act=run]').addEventListener('click', run);
+    const hintBtn = el.querySelector('[data-act=hint]');
+    if (hintBtn) hintBtn.addEventListener('click', () => {
+      if ((state.hints || 0) >= hints.length) return;
+      state.hints = (state.hints || 0) + 1; save();
+      el.querySelector('[data-hints]').insertAdjacentHTML('beforeend', '<div class="ex-hint"><span class="ex-hint-n">Hint ' + state.hints + '</span>' + hints[state.hints - 1] + '</div>');
+      hintBtn.textContent = '💡 Hint (' + state.hints + '/' + hints.length + ')';
+    });
+    el.querySelector('[data-act=reset]').addEventListener('click', () => { if (!confirm('Reset to the starter code?')) return; delete state.code; delete state.lastResults; save(); renderKata(el, cfg, state, save); });
+  }
+
+  /* ---------- breakit: supply an input that exposes a bug ----------
+     cfg: { label, q, fn, buggy, solution, argsTemplate, harness?, hint, explain } */
+  function renderBreakIt(el, cfg, state, save) {
+    let html = header(cfg.label || 'Break it', state.solved, '🧨');
+    html += '<div class="q-text">' + (cfg.q || '') + '</div>';
+    html += window.T.code('js', cfg.name || (cfg.fn + ' — plausible, but wrong'), cfg.buggy);
+    html += '<p class="dim" style="margin:-6px 0 8px">Write arguments (an array literal, one element per parameter) on which this version gives a <em>different answer</em> from a correct implementation — or never returns.</p>';
+    html += '<div class="ex-editor-wrap"><div class="codeblock-header"><span>arguments for ' + esc(cfg.fn) + '(…)</span><span class="kbd-hint">⌘/Ctrl+Enter runs</span></div><div class="editor-host"></div></div>';
+    html += '<div class="widget-actions"><button class="primary mini" data-act="run">▶ Try to break it</button><span class="trace-mistakes" data-tries>' + (state.tries ? state.tries + ' attempt' + (state.tries > 1 ? 's' : '') : '') + '</span></div>';
+    html += '<div class="ex-results" data-results></div>';
+    el.innerHTML = html;
+    const ed = window.Editor.create(el.querySelector('.editor-host'), { value: state.args !== undefined ? state.args : window.T.trim(cfg.argsTemplate || '[ ]'), minRows: 3, onChange: v => { state.args = v; save(); }, onRun: () => run() });
+    const resultsEl = el.querySelector('[data-results]');
+    if (state.lastHtml) resultsEl.innerHTML = state.lastHtml;
+    let running = false;
+    function run() {
+      if (running) return;
+      running = true;
+      const btn = el.querySelector('[data-act=run]'); btn.disabled = true; btn.textContent = '… running';
+      resultsEl.innerHTML = '<div class="ex-results-empty">Running…</div>';
+      const res = [];
+      window.Runner.run({ mode: 'break', spec: { refCode: window.T.trim(cfg.solution), buggyCode: window.T.trim(cfg.buggy), fn: cfg.fn, argsSrc: ed.value, harness: cfg.harness } }, {
+        onResult: (i, r) => { res[i] = r; },
+        onTimeout: () => {},
+        onDone: summary => {
+          running = false; btn.disabled = false; btn.textContent = '▶ Try to break it';
+          state.tries = (state.tries || 0) + 1;
+          const show = r => r ? (r.error ? 'threw — ' + r.error : 'returned ' + r.actual) : '—';
+          let out = '';
+          if (summary.loadError) out = '<div class="ex-load-error">' + esc(summary.loadError) + '</div>';
+          else if (summary.timedOut) {
+            if (summary.timedOutIndex === 1 && res[0]) { state.solved = true; out = explainBox('<div class="verdict v-right">✓ Broken — the buggy version never returned (infinite loop), while the correct one ' + esc(show(res[0])) + '.</div>' + (cfg.explain || '')); }
+            else out = explainBox('<div class="verdict v-wrong">The correct implementation itself timed out on that input — use something smaller.</div>');
+          } else if (summary.differ) {
+            state.solved = true;
+            out = explainBox('<div class="verdict v-right">✓ Broken. Correct: ' + esc(show(res[0])) + ' · Buggy: ' + esc(show(res[1])) + '</div>' + (cfg.explain || ''));
+          } else {
+            out = explainBox('<div class="verdict v-wrong">Both agree on that input (' + esc(show(res[0])) + ') — the bug is still hiding.</div>' + (state.tries >= 2 && cfg.hint ? '<p><strong>Hint:</strong> ' + cfg.hint + '</p>' : '<p class="dim">Think about which assumption the code makes, then construct the input that violates it.</p>'));
+          }
+          state.lastHtml = out; save();
+          resultsEl.innerHTML = out;
+          el.querySelector('[data-tries]').textContent = state.tries + ' attempt' + (state.tries > 1 ? 's' : '');
+          const head = el.querySelector('.widget-head');
+          if (state.solved && head && !head.querySelector('.widget-solved')) head.insertAdjacentHTML('beforeend', '<span class="widget-solved">✓ solved</span>');
+        }
+      });
+    }
+    el.querySelector('[data-act=run]').addEventListener('click', run);
+  }
+
+  const RENDERERS = { kata: renderKata, breakit: renderBreakIt, mcq: renderMCQ, multi: renderMulti, order: renderOrder, blanks: renderBlanks, spotbug: renderSpotBug, repl: renderRepl, drill: renderDrill, trace: renderTrace };
 
   function initAll(root, secId, store, save) {
     store.widgets = store.widgets || {};

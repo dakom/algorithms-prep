@@ -167,11 +167,33 @@
         '<div class="home-mod-meta"><span>' + (m.minutes ? '~' + m.minutes + ' min' : m.optional ? 'optional' : '') + '</span><span>' + secDone + '/' + m.sections.length + ' sections</span>' + (mexs.length ? '<span>' + mdone + '/' + mexs.length + ' exercises</span>' : '') + '</div></div>';
     }).join('') + '</div>';
 
+    // weak spots: rubric categories aggregated over completed exercises
+    const cats = window.Exercise.categoryTotals(store);
+    if (Object.keys(cats).length) {
+      const order = ['abstraction', 'algorithm', 'complexity', 'edge', 'explanation', 'implementation'];
+      html += '<h2>Where you lose points</h2><p class="dim">First-try reasoning answers, hint usage and edge-case coverage, aggregated across ' + done.length + ' completed exercise' + (done.length > 1 ? 's' : '') + '. Lowest bars are what to redo.</p><div class="weak-spots">' +
+        order.filter(c => cats[c]).map(c => { const t = cats[c], pct = Math.round(100 * t.got / t.max); return '<div class="weak-row"><span>' + esc(t.label) + '</span><span class="ex-score-bar"><span class="' + (pct >= 80 ? 'good' : pct >= 60 ? 'ok' : 'low') + '" style="width:' + pct + '%"></span></span><span class="weak-pct">' + pct + '%</span></div>'; }).join('') + '</div>';
+    }
+    // due for a redo: completed a day ago, or scored under 80, or leaned on hints
+    const DAY = 24 * 3600 * 1000;
+    const due = done.map(e => {
+      const st = store.ex[e.cfg.id], sc = window.Exercise.score(e.cfg, store), h = window.Exercise.hintsUsed(e.cfg, store);
+      const why = [];
+      if (st.completedAt && Date.now() - st.completedAt > DAY) why.push('completed ' + Math.floor((Date.now() - st.completedAt) / DAY) + 'd ago');
+      if (sc !== null && sc < 80) why.push('scored ' + sc);
+      if (h) why.push(h + ' hint' + (h > 1 ? 's' : ''));
+      return { e, why };
+    }).filter(d => d.why.length);
+    if (due.length) {
+      html += '<h2>Due for a cold redo</h2><p class="dim">Retention comes from the second attempt, not the first. Open one and press <strong>↻ Redo cold</strong> at the bottom of its review.</p><div class="ex-board">' +
+        due.map(d => '<div class="ex-board-row due" data-go="' + d.e.mi + '/' + d.e.si + '"><span class="ex-status redo">redo</span><span class="ex-board-title">' + esc(d.e.cfg.title) + '</span><span class="ex-board-mod">M' + (d.e.mi + 1) + '</span><span class="ex-board-why">' + esc(d.why.join(' · ')) + '</span></div>').join('') + '</div>';
+    }
+
     html += '<h2>Exercise board</h2><div class="ex-board">' + exs.map(e => {
       const s = exStatus(e.cfg), sc = window.Exercise.score(e.cfg, store);
-      const el = (store.ex[e.cfg.id] || {}).elapsed;
-      return '<div class="ex-board-row" data-go="' + e.mi + '/' + e.si + '"><span class="ex-status ' + s.toLowerCase().replace(/\s/g, '-') + '">' + s + '</span><span class="ex-board-title">' + esc(e.cfg.title) + '</span><span class="ex-board-mod">M' + (e.mi + 1) + '</span>' +
-        '<span class="ex-board-time">' + (el ? fmtMin(el) : '') + (e.cfg.time ? ' <span class="dim">/ ' + e.cfg.time + '</span>' : '') + '</span><span class="ex-board-score">' + (sc === null ? '' : sc + '<span class="dim">/100</span>') + '</span></div>';
+      const st = store.ex[e.cfg.id] || {}, el = st.elapsed, attempts = (st.attempts || []).length;
+      return '<div class="ex-board-row" data-go="' + e.mi + '/' + e.si + '"><span class="ex-status ' + s.toLowerCase().replace(/\s/g, '-') + '">' + s + '</span><span class="ex-board-title">' + esc(e.cfg.title) + (attempts ? ' <span class="ex-attempt-n" title="previous attempts">×' + (attempts + (s === 'Complete' ? 1 : 0)) + '</span>' : '') + '</span><span class="ex-board-mod">M' + (e.mi + 1) + '</span>' +
+        '<span class="ex-board-time">' + (el ? fmtMin(el) : '') + (e.cfg.time ? ' <span class="dim">/ ' + e.cfg.time + '</span>' : '') + '</span><span class="ex-board-score">' + (sc === null ? (attempts && st.attempts[attempts - 1].score !== null ? '<span class="dim">' + st.attempts[attempts - 1].score + '</span>' : '') : sc + '<span class="dim">/100</span>') + '</span></div>';
     }).join('') + '</div>';
 
     $('#content').innerHTML = html;

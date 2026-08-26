@@ -44,6 +44,7 @@
     const st = (store.ex || {})[cfg.id];
     if (!st) return 'Not started';
     if (st.completedAll) return 'Complete';
+    if (st.redo && st.phase === 'reason') return 'Redo';
     const names = { reason: 'Reasoning', code: 'Coding', test: 'Testing', done: 'Reasoning' };
     if (st.phase === 'done' && cfg.stages.length > 1) return 'Coding';
     return names[st.phase] || 'Reasoning';
@@ -86,6 +87,32 @@
     const per = cfg.stages.map((_, si) => stageScore(cfg, st, si));
     return Math.round(per.reduce((a, s) => a + s.pct, 0) / per.length);
   }
+  function hintsUsed(cfg, store) {
+    const st = (store.ex || {})[cfg.id];
+    if (!st) return 0;
+    return Object.values(st.stages || {}).reduce((a, s) => a + (s.hints || 0), 0);
+  }
+  /* rubric categories aggregated across every completed exercise → { cat: { got, max } } */
+  function categoryTotals(store) {
+    const totals = {};
+    REGISTRY.forEach(cfg => {
+      const st = (store.ex || {})[cfg.id];
+      if (!st || !st.completedAll) return;
+      cfg.stages.forEach((_, si) => stageScore(cfg, st, si).rows.forEach(r => {
+        const t = totals[r.cat] || (totals[r.cat] = { got: 0, max: 0, label: r.label });
+        t.got += r.pts; t.max += r.weight;
+      }));
+    });
+    return totals;
+  }
+  /* "Redo cold": archive this attempt and start over from a blank editor */
+  function redo(cfg, store) {
+    const st = (store.ex || {})[cfg.id];
+    if (!st) return;
+    const attempts = st.attempts || [];
+    attempts.push({ score: score(cfg, store), at: st.completedAt || Date.now(), hints: hintsUsed(cfg, store), elapsed: Math.round(st.elapsed || 0) });
+    store.ex[cfg.id] = { stage: 0, phase: 'reason', stages: {}, elapsed: 0, attempts, redo: true };
+  }
 
   /* ---------- rendering ---------- */
   function fmtTime(s) { s = Math.floor(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
@@ -97,7 +124,7 @@
     const stage = cfg.stages[si];
     const ss = stageState(st, si);
     const multi = cfg.stages.length > 1;
-    if (st.phase === 'done' && si === cfg.stages.length - 1) st.completedAll = true;   // before the header reads status()
+    if (st.phase === 'done' && si === cfg.stages.length - 1 && !st.completedAll) { st.completedAll = true; st.completedAt = Date.now(); }   // before the header reads status()
     const phases = ['reason'].concat(stage.tests.length ? ['code'] : []).concat(stage.ownTests ? ['test'] : []).concat(['done']);
     const phaseIdx = Math.max(0, phases.indexOf(st.phase));
     const icon = cfg.interview ? '🎤' : (multi ? '🏗' : '🧪');
@@ -153,7 +180,7 @@
     html += '<div class="ex-actions"><button class="primary" data-act="unlock"' + (allDone || !stage.reasoning.length ? '' : ' disabled') + '>' + (allDone || !stage.reasoning.length ? (stage.tests.length ? 'Unlock the editor →' : 'Continue to review →') : 'Answer all questions to continue') + '</button></div>';
     body.innerHTML = html;
     bindQuestions(body, stage, ss, save, () => renderReason(body, cfg, st, si, save, rerender));
-    body.querySelector('[data-act=unlock]').addEventListener('click', () => { st.phase = stage.tests.length ? 'code' : 'done'; save(); rerender(); });
+    body.querySelector('[data-act=unlock]').addEventListener('click', () => { st.phase = stage.tests.length ? 'code' : 'done'; delete st.redo; save(); rerender(); });
   }
 
   function renderQuestion(q, qi, a) {
@@ -240,7 +267,7 @@
     let html = '';
     if (cfg.prelude) html += '<details class="ex-prelude"><summary>Provided code (available to your solution)</summary>' + window.T.code('js', 'provided', cfg.prelude) + '</details>';
     const fnName = stage.fn || cfg.fn;
-    html += '<div class="ex-editor-wrap"><div class="codeblock-header"><span>' + esc(fnName + (cfg.isClass ? ' (class)' : '()')) + ' — your solution</span><span class="kbd-hint">⌘/Ctrl+Enter runs the tests</span></div><div class="editor-host"></div></div>';
+    html += '<div class="ex-editor-wrap"><div class="codeblock-header"><span>' + esc(fnName + ((stage.isClass || cfg.isClass) ? ' (class)' : '()')) + ' — your solution</span><span class="kbd-hint">⌘/Ctrl+Enter runs the tests</span></div><div class="editor-host"></div></div>';
     html += '<div class="ex-actions"><button class="primary" data-act="run">▶ Run hidden tests</button>' +
       '<button class="ghost" data-act="hint">' + (cfg.interview ? '🙋 Ask interviewer' : '💡 Hint') + ' (' + ss.hints + '/' + stage.hints.length + ')</button>' +
       '<button class="ghost" data-act="reset">Reset code</button>' +
@@ -439,7 +466,9 @@
     html += '<div class="ex-actions">' +
       (!last ? '<button class="primary" data-act="next-stage">Next requirement → ' + esc(cfg.stages[si + 1].title || '') + '</button>' : '<div class="ex-pass-banner">🎉 Exercise complete' + (cfg.stages.length > 1 ? ' — all ' + cfg.stages.length + ' requirements' : '') + '</div>') +
       (stage.tests.length ? '<button class="ghost" data-act="back-code">← Back to my code</button>' : '') +
+      (last ? '<button class="ghost" data-act="redo" title="Archive this attempt and start again from a blank editor — do this tomorrow">↻ Redo cold</button>' : '') +
       '<button class="ghost danger" data-act="restart">Restart exercise</button></div>';
+    if (st.attempts && st.attempts.length) html += '<div class="ex-attempts">Previous attempts: ' + st.attempts.map(a => '<span class="ex-attempt">' + (a.score === null ? '–' : a.score) + '<span class="dim">/100</span>' + (a.hints ? ' · ' + a.hints + ' hint' + (a.hints > 1 ? 's' : '') : '') + '</span>').join(' ') + '</div>';
     body.innerHTML = html;
     const fuTa = body.querySelector('.ex-text');
     if (fuTa) {
@@ -452,11 +481,16 @@
     if (next) next.addEventListener('click', () => { st.stage = si + 1; st.phase = 'reason'; save(); rerender(); window.scrollBy(0, -200); });
     const bc = body.querySelector('[data-act=back-code]');
     if (bc) bc.addEventListener('click', () => { st.phase = 'code'; save(); rerender(); });
+    const redoBtn = body.querySelector('[data-act=redo]');
+    if (redoBtn) redoBtn.addEventListener('click', () => {
+      if (!confirm('Archive this attempt (score kept in history) and restart from a blank editor?')) return;
+      redo(cfg, store); save(); rerender(); window.scrollBy(0, -200);
+    });
     body.querySelector('[data-act=restart]').addEventListener('click', () => {
       if (!confirm('Restart this exercise from scratch? Your code and answers here will be cleared.')) return;
       delete store.ex[cfg.id]; save(); rerender();
     });
   }
 
-  window.Exercise = { register, render, status, score, all: () => REGISTRY, RUBRIC, stageScore };
+  window.Exercise = { register, render, status, score, hintsUsed, categoryTotals, redo, paintResults, all: () => REGISTRY, RUBRIC, stageScore };
 })();

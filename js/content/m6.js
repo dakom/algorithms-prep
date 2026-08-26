@@ -77,6 +77,38 @@ ${widget('mcq', {
   explain: '<p>“Most recent” with in-order arrival is just the last 10 — a heap is overkill. The interviewer wants to see you notice that before reaching for the fancy structure. If alerts arrived <em>out</em> of order, the heap of size 10 keyed by timestamp is the answer.</p>'
 })}
 
+${widget('breakit', {
+  label: 'Break it — ranks transactions, not accounts',
+  q: 'This <code>topKAccounts</code> sorts by amount and dedupes account IDs. It passes several tests. Construct <code>transactions</code> and <code>k</code> where it returns the wrong ranking.',
+  fn: 'topKAccounts',
+  name: 'topKAccounts.js — no aggregation',
+  buggy: `
+function topKAccounts(transactions, k) {
+  const sorted = [...transactions].sort((a, b) => b[1] - a[1]);
+  const result = [];
+  for (const [account] of sorted) {
+    if (!result.includes(account)) result.push(account);
+    if (result.length === k) break;
+  }
+  return result;
+}`,
+  solution: `
+function topKAccounts(transactions, k) {
+  const totals = new Map();
+  for (const [a, amt] of transactions) totals.set(a, (totals.get(a) ?? 0) + amt);
+  return [...totals].sort((a, b) => b[1] - a[1]).slice(0, k).map(([a]) => a);
+}`,
+  argsTemplate: `
+[
+  [["A", 50], ["B", 20], ["C", 200]],   // transactions
+  1                                     // k
+]`,
+  sampleBreak: [[['A', 60], ['B', 40], ['B', 40]], 1],
+  sampleOk: [[[['A', 50], ['B', 20], ['C', 200]], 1], [[['A', 5], ['B', 7]], 2]],
+  hint: 'One big transaction versus many small ones from the same account.',
+  explain: '<p>The largest <em>single</em> transaction is not the largest <em>total</em>. Any account that wins on volume through several small transactions exposes it. The lesson generalizes: whenever the prompt says “by total”, aggregation is a separate first step — and your first test should be the many-small-vs-one-big case.</p>'
+})}
+
 ${widget('exercise', {
   id: 'ex-6-1',
   title: 'topKAccounts(transactions, k)',
@@ -97,6 +129,18 @@ ${code('js', 'example', `topKAccounts([["A", 50], ["B", 20], ["A", 70], ["C", 20
       explain: '<p>O(n) to aggregate, O(log k) per account to maintain the heap. The sort alternative is O(n + m log m) — say both and “sort is simpler; the heap wins when k ≪ m or for a stream”.</p>' },
     { type: 'text', cat: 'explanation', q: 'Explain the approach, starting with the simplest correct one.', min: 50,
       model: '<p>“First aggregate totals per account in a Map — O(n). The simplest correct answer then sorts the entries by total descending and takes the first k: O(m log m). If k is small relative to m, or the totals arrive as a stream, I’d keep a min-heap of size k instead — O(m log k) — popping the smallest whenever the heap exceeds k. Ties: I’d ask how to break them.”</p>' }
+  ],
+  ownTests: true,
+  ownTemplate: `
+[
+  { name: 'clear winner', args: [[['A', 1], ['B', 9]], 1], expect: ['B'] },
+  // add at least two more — many-small beats one-big, k larger than the accounts, k = 0…
+]`,
+  coverage: [
+    { label: 'many small beat one big', hit: args => { const [t, k] = args; if (!Array.isArray(t)) return false; const totals = new Map(), maxSingle = new Map(); for (const [a, x] of t) { totals.set(a, (totals.get(a) ?? 0) + x); maxSingle.set(a, Math.max(maxSingle.get(a) ?? -Infinity, x)); } const byTotal = [...totals].sort((a, b) => b[1] - a[1])[0], bySingle = [...maxSingle].sort((a, b) => b[1] - a[1])[0]; return !!byTotal && !!bySingle && byTotal[0] !== bySingle[0]; } },
+    { label: 'k larger than the number of accounts', hit: args => { const [t, k] = args; return Array.isArray(t) && k > new Set(t.map(x => x[0])).size; } },
+    { label: 'k = 0 or empty input', hit: args => args[1] === 0 || (Array.isArray(args[0]) && args[0].length === 0) },
+    { label: 'negative amount', hit: args => Array.isArray(args[0]) && args[0].some(x => x[1] < 0) }
   ],
   starter: `
 function topKAccounts(transactions, k) {
