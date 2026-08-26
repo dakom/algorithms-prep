@@ -2,7 +2,7 @@
 
 **▶ Use it live: <https://dakom.github.io/algorithms-prep/>**
 
-A self-contained, interactive training site for pattern-recognition-first
+A self-contained, interactive, no-build training site for pattern-recognition-first
 coding interviews: hash maps/sets, graph traversal, trees, intervals, heaps,
 and stateful implementation, ending in a timed mock interview. Built for an
 experienced developer who needs the interview *reflexes* — see the abstraction,
