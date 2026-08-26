@@ -89,7 +89,21 @@ for (const cfg of window.Exercise.all()) {
     });
     // 4. own-tests: reference expectations validated by the checker/reference
     if (stage.ownTests) {
-      const own = stage.tests.filter(t => 'args' in t && !t.run && !t.expectThrow).map(t => ({ name: t.name, args: t.args, expect: 'expect' in t ? t.expect : undefined }));
+      // Deeply nested inputs (e.g. a 1,500-node chain) are runtime stress tests, not something a learner
+      // would type as a literal — and `new Function` over their JSON overflows the parser stack on Node 20.
+      const MAX_NESTING = 100;
+      const nestedDeeperThan = (v, limit) => {            // iterative: must not itself overflow on deep inputs
+        let frontier = [v];
+        for (let depth = 0; frontier.length; depth++) {
+          if (depth > limit) return true;
+          frontier = frontier.flatMap(x => (x && typeof x === 'object') ? (Array.isArray(x) ? x : Object.values(x)) : []);
+        }
+        return false;
+      };
+      const eligible = stage.tests.filter(t => 'args' in t && !t.run && !t.expectThrow);
+      const tooDeep = eligible.filter(t => nestedDeeperThan(t.args, MAX_NESTING));
+      if (tooDeep.length) console.log('  · own-tests round-trip skips ' + tooDeep.map(t => '"' + t.name + '"').join(', ') + ' (nested deeper than ' + MAX_NESTING + ' levels)');
+      const own = eligible.filter(t => !tooDeep.includes(t)).map(t => ({ name: t.name, args: t.args, expect: 'expect' in t ? t.expect : undefined }));
       if (!stage.check && own.some(t => t.expect === undefined)) fail('ownTests stage has tests without expect and no check' + label);
       // compute expect via reference for check-based exercises
       const refFn = RunnerCore.loadSymbol(sol, fn);
