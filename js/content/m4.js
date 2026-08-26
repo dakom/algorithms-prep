@@ -1,216 +1,100 @@
-/* Module 4 — Sorting and Intervals */
+/* Module 4 — Trees and Recursion */
 (function () {
   const { code, callout, diagram, widget } = window.T;
+  const N = (val, left = null, right = null) => ({ val, left, right });
+  const chain = n => { let t = null; for (let i = n; i >= 1; i--) t = N('n' + i, t, null); return t; };
 
   window.MODULES.push({
-    title: 'Sorting & Intervals',
-    blurb: 'Schedules, windows, overlapping ranges: sort first, then scan once',
+    title: 'Trees & Recursion',
+    blurb: 'Trees are graphs with rules — the same traversals, plus a base case',
     minutes: 20,
     sections: [
-
-      /* ------------------------------------------------ 4.0 ------ */
-      {
-        type: 'read',
-        title: 'Sort first, then scan',
-        minutes: 10,
-        html: `
-<div class="big-quote">If the problem involves schedules, reservations, time ranges, windows, or timestamps — sort, then walk once.</div>
-
-<p>Sorting by start time turns a messy 2-D “does anything overlap anything?” question (O(n²) to check every pair) into a 1-D scan: after sorting, an interval can only overlap the ones right before it. O(n log n) for the sort, O(n) for the scan.</p>
-
-${diagram(`
-unsorted:  [8,10] [1,4] [9,12] [2,5]
-sorted:    [1,4] [2,5] [8,10] [9,12]
-scan:      cur=[1,4]  → [2,5] overlaps (2 ≤ 4) → cur=[1,5]
-                      → [8,10] no (8 > 5)      → emit [1,5], cur=[8,10]
-                      → [9,12] overlaps        → cur=[8,12]
-           end        → emit [8,12]           (don't lose the last one!)`)}
-
-<h2>Two conventions you must state out loud</h2>
-<table>
-<tr><th>Question</th><th>Convention this site uses</th><th>Say</th></tr>
-<tr><td>Do <code>[1,2]</code> and <code>[2,3]</code> overlap for <em>merging</em>?</td><td><strong>Yes</strong> — touching intervals merge into <code>[1,3]</code> (condition: <code>next.start ≤ cur.end</code>)</td><td>“I’ll treat touching ranges as mergeable — shout if you want them separate.”</td></tr>
-<tr><td>Is a meeting ending at 10 in <em>conflict</em> with one starting at 10?</td><td><strong>No</strong> — back-to-back is fine (conflict: <code>next.start &lt; prev.end</code>)</td><td>“I’ll assume back-to-back meetings don’t conflict.”</td></tr>
-</table>
-<p>Different conventions, on purpose: real prompts vary, and the point is that the ≤ vs &lt; choice is a <em>business rule you confirm</em>, not something you guess.</p>
-
-<h2>The JavaScript sort trap</h2>
-${widget('repl', {
-  label: 'Run it — default sort is lexicographic',
-  q: 'Predict, then run.',
-  name: 'sort-trap.js',
-  code: `
-console.log([10, 9, 1, 100].sort());                       // strings!
-console.log([10, 9, 1, 100].sort((a, b) => a - b));        // numbers
-console.log([[10, 12], [9, 11], [1, 2]].sort());            // arrays → "10,12" < "9,11"
-console.log([[10, 12], [9, 11], [1, 2]].sort((a, b) => a[0] - b[0]));
-
-const original = [[3, 4], [1, 2]];
-const sorted = original.sort((a, b) => a[0] - b[0]);
-console.log(original === sorted, original);                // sort() MUTATES the caller's array
-console.log([...original].reverse(), original);            // copy first if you must not`,
-  explain: '<p>Three interview-grade facts: (1) <code>sort()</code> without a comparator compares <em>strings</em>; (2) always pass <code>(a, b) => a[0] - b[0]</code>; (3) <code>sort</code> mutates in place — copy with <code>[...arr]</code> or <code>arr.slice()</code> (or use <code>toSorted</code>) when the caller’s input must stay intact. Mutating input is on every interviewer’s mental checklist.</p>'
-})}
-
-${widget('mcq', {
-  label: 'The overlap condition',
-  q: 'Intervals are sorted by start. <code>cur = [1, 5]</code>. Which condition means the next interval <code>[s, e]</code> overlaps (or touches) <code>cur</code>?',
-  choices: ['<code>s &lt; 1</code>', '<code>s &lt;= 5</code> — its start is not past the current end', '<code>e &gt; 5</code>', '<code>s &lt; e</code>'],
-  answer: 1,
-  explain: '<p>Because of the sort, <code>s ≥ 1</code> is guaranteed; the only question is whether it starts before (or at) the current end. When merging, the new end is <code>Math.max(5, e)</code> — not just <code>e</code> — to handle a fully contained interval like <code>[2, 3]</code>.</p>'
-})}
-
-${widget('exercise', {
-  id: 'ex-4-1',
-  title: 'mergeIntervals(intervals)',
-  time: 8,
-  fn: 'mergeIntervals',
-  prompt: `<p>Given <code>[start, end]</code> pairs in any order, return the merged, non-overlapping intervals sorted by start. Touching intervals (<code>[1,2]</code> and <code>[2,3]</code>) merge. Do not mutate the input.</p>
-${code('js', 'example', `mergeIntervals([[1, 4], [2, 5], [8, 10], [9, 12]])   // [[1, 5], [8, 12]]`)}`,
-  reasoning: [
-    { cat: 'abstraction', q: 'Which pattern?', choices: ['Graph — intervals connected if overlapping, then components', 'Sort by start, then a single scan merging into a “current” interval', 'Heap of end times', 'Two nested loops comparing every pair'], answer: 1,
-      explain: '<p>The graph view is technically valid (and O(n²)); sort + scan is the expected O(n log n).</p>' },
-    { cat: 'algorithm', q: 'When the next interval overlaps the current one, the new end is…', choices: ['<code>next.end</code>', '<code>Math.max(cur.end, next.end)</code> — the next interval might be entirely inside the current one', '<code>cur.end + next.end</code>', '<code>next.start</code>'], answer: 1,
-      explain: '<p><code>[1, 10]</code> then <code>[2, 3]</code>: taking <code>next.end</code> would shrink the current interval to <code>[1, 3]</code>. Fully-contained is the classic hidden test.</p>' },
-    { cat: 'edge', q: 'Which of these is the most common bug in this problem?', choices: ['Sorting descending', 'Forgetting to push the final “current” interval after the loop', 'Using a Set', 'Off-by-one in the loop index'], answer: 1,
-      explain: '<p>The scan emits an interval only when the <em>next</em> one doesn’t overlap — so the last one is never emitted inside the loop. Push it after.</p>' },
-    { cat: 'complexity', q: 'Complexity?', choices: ['O(n) — one scan', 'O(n log n) — the sort dominates; the scan is O(n)', 'O(n²)', 'O(log n)'], answer: 1,
-      explain: '<p>Say both parts: “sort is n log n, the merge pass is linear, so n log n overall; O(n) space for the output (or O(1) extra if sorting in place were allowed).”</p>' }
-  ],
-  starter: `
-function mergeIntervals(intervals) {
-  // copy + sort by start, then scan
-}`,
-  tests: [
-    { name: 'example', args: [[[1, 4], [2, 5], [8, 10], [9, 12]]], expect: [[1, 5], [8, 12]] },
-    { name: 'empty input', args: [[]], expect: [] },
-    { name: 'single interval', args: [[[3, 7]]], expect: [[3, 7]] },
-    { name: 'fully contained interval', args: [[[1, 10], [2, 3], [4, 5]]], expect: [[1, 10]] },
-    { name: 'touching intervals merge', args: [[[1, 2], [2, 3]]], expect: [[1, 3]] },
-    { name: 'unsorted input', args: [[[8, 10], [1, 4], [9, 12], [2, 5]]], expect: [[1, 5], [8, 12]] },
-    { name: 'no overlaps at all', args: [[[5, 6], [1, 2], [3, 4]]], expect: [[1, 2], [3, 4], [5, 6]] },
-    { name: 'numeric sort required (lexicographic would break)', args: [[[5, 6], [10, 11], [7, 8]]], expect: [[5, 6], [7, 8], [10, 11]] },
-    { name: 'chain that merges everything', args: [[[1, 3], [2, 4], [3, 5], [4, 6]]], expect: [[1, 6]] },
-    { name: 'last interval is not lost', args: [[[1, 2], [5, 6]]], expect: [[1, 2], [5, 6]] },
-    { name: 'input must not be mutated', args: [[[3, 4], [1, 2]]], expect: [[1, 2], [3, 4]], noMutate: 'fail' },
-    { name: 'same start, different ends', args: [[[1, 5], [1, 3], [1, 8]]], expect: [[1, 8]] }
-  ],
-  antiSolutions: [
-    { name: 'sorts in place (mutates input)', code: 'function mergeIntervals(iv) { if (!iv.length) return []; iv.sort((a, b) => a[0] - b[0]); const out = [[...iv[0]]]; for (let i = 1; i < iv.length; i++) { const cur = out[out.length - 1]; if (iv[i][0] <= cur[1]) cur[1] = Math.max(cur[1], iv[i][1]); else out.push([...iv[i]]); } return out; }' },
-    { name: 'uses next.end instead of max', code: 'function mergeIntervals(iv) { const s = [...iv].sort((a, b) => a[0] - b[0]); const out = []; for (const [a, b] of s) { const cur = out[out.length - 1]; if (cur && a <= cur[1]) cur[1] = b; else out.push([a, b]); } return out; }' },
-    { name: 'default (lexicographic) sort', code: 'function mergeIntervals(iv) { const s = [...iv].sort(); const out = []; for (const [a, b] of s) { const cur = out[out.length - 1]; if (cur && a <= cur[1]) cur[1] = Math.max(cur[1], b); else out.push([a, b]); } return out; }' },
-    { name: 'loses the last interval', code: 'function mergeIntervals(iv) { if (!iv.length) return []; const s = [...iv].sort((a, b) => a[0] - b[0]); const out = []; let cur = [...s[0]]; for (let i = 1; i < s.length; i++) { if (s[i][0] <= cur[1]) cur[1] = Math.max(cur[1], s[i][1]); else { out.push(cur); cur = [...s[i]]; } } return out; }' }
-  ],
-  ownTests: true,
-  ownTemplate: `
-[
-  { name: 'two separate', args: [[[1, 2], [4, 5]]], expect: [[1, 2], [4, 5]] },
-  // add at least two more — contained, touching, unsorted, empty…
-]`,
-  coverage: [
-    { label: 'empty input', hit: args => Array.isArray(args[0]) && args[0].length === 0 },
-    { label: 'unsorted input', hit: args => Array.isArray(args[0]) && args[0].some((iv, i) => i > 0 && iv[0] < args[0][i - 1][0]) },
-    { label: 'fully contained interval', hit: args => Array.isArray(args[0]) && args[0].some(a => args[0].some(b => a !== b && a[0] <= b[0] && b[1] <= a[1] && (a[0] < b[0] || b[1] < a[1]))) },
-    { label: 'touching intervals', hit: args => Array.isArray(args[0]) && args[0].some(a => args[0].some(b => a !== b && a[1] === b[0])) }
-  ],
-  hints: [
-    '<p>Sort a <em>copy</em> by start: <code>const s = [...intervals].sort((a, b) => a[0] - b[0])</code>.</p>',
-    '<p>Keep <code>cur</code> = a copy of the first interval. For each next: overlap if <code>next[0] &lt;= cur[1]</code>.</p>',
-    '<p>On overlap: <code>cur[1] = Math.max(cur[1], next[1])</code>. Otherwise push <code>cur</code> and start a new one.</p>',
-    '<p>After the loop, push the final <code>cur</code>. Handle the empty input before touching <code>s[0]</code>.</p>'
-  ],
-  solution: `
-function mergeIntervals(intervals) {
-  if (intervals.length === 0) return [];
-  const sorted = [...intervals].sort((a, b) => a[0] - b[0]);   // copy: don't mutate input
-  const result = [];
-  let cur = [...sorted[0]];
-  for (let i = 1; i < sorted.length; i++) {
-    const [start, end] = sorted[i];
-    if (start <= cur[1]) {                    // overlaps or touches
-      cur[1] = Math.max(cur[1], end);         // max: handles fully-contained
-    } else {
-      result.push(cur);
-      cur = [start, end];
-    }
-  }
-  result.push(cur);                           // the last interval
-  return result;
-}`,
-  solutionExplain: '<p>If strictly-touching should <em>not</em> merge, the condition becomes <code>start &lt; cur[1]</code>. One character, so say the convention before writing it.</p>',
-  complexity: '<p>“O(n log n) time, dominated by the sort; the scan is O(n). O(n) space for the sorted copy and the output.”</p>',
-  followUp: {
-    q: 'Follow-up: “Given the merged intervals, find the total covered length.” Change?',
-    choices: ['Recompute from scratch with nested loops', 'Sum <code>end - start</code> over the merged result — merging already removed the double counting', 'Sort by end instead', 'Use a Set of integers'], answer: 1,
-    explain: '<p>Merged intervals are disjoint, so the lengths add. This is why merging is usually step one of any “how much time is covered / free” question.</p>'
-  }
-})}
-`
-      },
 
       /* ------------------------------------------------ 4.1 ------ */
       {
         type: 'read',
-        title: 'Exercise 4.2 — Can attend all meetings?',
-        minutes: 6,
+        title: 'Trees are graphs with stronger structure',
+        minutes: 10,
         html: `
-<p>Same pattern, less code: sort by start, then compare each meeting only with the one before it. Back-to-back meetings (<code>[9,10]</code> and <code>[10,11]</code>) do <strong>not</strong> conflict here — note the different convention from merging, and say it.</p>
+<p>A tree is a graph with rules: one <strong>root</strong>, every other node has exactly one parent, <strong>no cycles</strong>, exactly one path between any two nodes. Those rules buy you something: <em>you don't need a visited set</em> — you can't revisit a node by following child pointers. What replaces it is the <strong>base case</strong>: <code>if (!node) return …</code>.</p>
+
+${diagram(`
+      A              node = { val: 'A', left: {…}, right: {…} }
+     / \\             leaf = { val: 'D', left: null, right: null }
+    B   C            empty tree = null
+       /
+      D              depth (in nodes): A=1, B/C=2, D=3   → maxDepth = 3`)}
+
+<p><strong>Two traversals, same as graphs:</strong> DFS (recursion — preorder/inorder/postorder are just where you put the "do work" line) and BFS (a queue — <em>level order</em>). The recursive shape you'll write in 90% of tree questions:</p>
+${code('js', 'the recursive template', `
+function solve(node) {
+  if (node === null) return BASE;              // 1. base case — forgetting it = crash
+  const left = solve(node.left);               // 2. trust the recursion on subtrees
+  const right = solve(node.right);
+  return COMBINE(node.val, left, right);        // 3. combine
+}`)}
+
+${callout('warn', 'Depth: nodes or edges?', `<p>“Depth 3” can mean 3 nodes on the path or 3 edges (which is 4 nodes). This site counts <strong>nodes</strong> (so a single node has depth 1, an empty tree 0). In an interview, <em>ask</em> — then the empty-tree and single-node cases fall out of your convention.</p>`)}
+
+${widget('mcq', {
+  label: 'Base case reflex',
+  q: 'A function computes the sum of all values in a tree. Which base case is right?',
+  choices: ['<code>if (!node.left && !node.right) return node.val</code>', '<code>if (node === null) return 0</code>', '<code>if (node.val === undefined) return 0</code>', 'No base case is needed; the loop stops at leaves'],
+  answer: 1,
+  explain: '<p>Checking for null <em>at the top</em> handles the empty tree, missing children and leaves uniformly. The leaf-check version crashes on an empty tree and duplicates logic.</p>'
+})}
 
 ${widget('exercise', {
-  id: 'ex-4-2',
-  title: 'hasConflict(intervals)',
+  id: 'ex-4-1',
+  title: 'maxDepth(root)',
   time: 5,
-  fn: 'hasConflict',
-  prompt: `<p>Given meetings as <code>[start, end]</code> in any order, return <code>true</code> if any two overlap. A meeting that starts exactly when another ends is <em>not</em> a conflict. Do not mutate the input.</p>
-${code('js', 'example', `hasConflict([[9, 10], [10, 11]])   // false (back-to-back)
-hasConflict([[9, 11], [10, 12]])   // true`)}`,
+  fn: 'maxDepth',
+  prompt: `<p>Nodes are <code>{ val, left, right }</code>; missing children are <code>null</code>. Return the number of nodes on the longest root-to-leaf path. An empty tree (<code>null</code>) has depth 0.</p>
+${code('js', 'example', `const tree = { val: 'A',
+  left:  { val: 'B', left: null, right: null },
+  right: { val: 'C', left: { val: 'D', left: null, right: null }, right: null } };
+maxDepth(tree)   // 3   (A → C → D)`)}`,
   reasoning: [
-    { cat: 'algorithm', q: 'After sorting by start, which pairs need checking?', choices: ['Every pair', 'Only each interval against the one immediately before it', 'Only the first and last', 'Each interval against all earlier ones'], answer: 1,
-      explain: '<p>If interval i doesn’t overlap i−1 (which starts no later than anything before it and — for a conflict-free prefix — ends latest), it overlaps nothing earlier. That’s the argument the sort buys you.</p>' },
-    { cat: 'edge', q: 'The conflict condition with sorted intervals is…', choices: ['<code>next.start &lt;= prev.end</code>', '<code>next.start &lt; prev.end</code> — strictly before, so back-to-back is allowed', '<code>next.end &lt; prev.end</code>', '<code>next.start === prev.start</code>'], answer: 1,
-      explain: '<p>Strict inequality encodes the “back-to-back is fine” rule. Compare with merging, where ≤ merged touching intervals.</p>' },
-    { cat: 'complexity', q: 'Complexity?', choices: ['O(n)', 'O(n log n) for the sort', 'O(n²)', 'O(1)'], answer: 1,
-      explain: '<p>Sort dominates. Without sorting you’d need every pair: O(n²).</p>' }
+    { cat: 'algorithm', q: 'Express the answer recursively.', choices: ['depth(node) = depth(left) + depth(right)', 'depth(node) = 1 + max(depth(left), depth(right)), with depth(null) = 0', 'depth(node) = number of children + 1', 'depth(node) = depth(left) + 1'], answer: 1,
+      explain: '<p>The deepest path goes through the deeper child, plus this node. The base case makes leaves work without special handling: 1 + max(0, 0) = 1.</p>' },
+    { cat: 'edge', q: 'Which inputs must the base case cover?', choices: ['Only the empty tree', 'The empty tree and every missing child — <code>null</code> can appear anywhere', 'Only leaves', 'None; the tree is guaranteed non-empty'], answer: 1,
+      explain: '<p>Any node may have a null left or right. One null check at the top of the function handles all of them.</p>' },
+    { cat: 'complexity', q: 'Complexity for n nodes?', choices: ['O(n) time, O(h) space for the recursion stack (h = height)', 'O(log n)', 'O(n²)', 'O(n) time, O(1) space'], answer: 0,
+      explain: '<p>Each node visited once. The recursion stack is as deep as the tree — O(log n) balanced, O(n) for a chain. Say the “h” part unprompted.</p>' }
   ],
   starter: `
-function hasConflict(intervals) {
-  // sort a copy by start; compare neighbors
+function maxDepth(root) {
+  // base case first
 }`,
   tests: [
-    { name: 'back-to-back is not a conflict', args: [[[9, 10], [10, 11]]], expect: false },
-    { name: 'overlap', args: [[[9, 11], [10, 12]]], expect: true },
-    { name: 'empty', args: [[]], expect: false },
-    { name: 'single meeting', args: [[[1, 2]]], expect: false },
-    { name: 'conflict only visible after sorting', args: [[[13, 14], [1, 5], [10, 12], [4, 6]]], expect: true },
-    { name: 'sorted, no conflicts', args: [[[1, 2], [3, 4], [5, 6]]], expect: false },
-    { name: 'fully contained meeting', args: [[[1, 10], [3, 4]]], expect: true },
-    { name: 'same start time', args: [[[5, 6], [5, 7]]], expect: true },
-    { name: 'input not mutated', args: [[[3, 4], [1, 2]]], expect: false, noMutate: 'fail' },
-    { name: 'numeric sort required', args: [[[10, 11], [9, 12]]], expect: true }
+    { name: 'example', args: [N('A', N('B'), N('C', N('D')))], expect: 3 },
+    { name: 'empty tree', args: [null], expect: 0 },
+    { name: 'single node', args: [N('A')], expect: 1 },
+    { name: 'left-skewed chain of 5', args: [chain(5)], expect: 5 },
+    { name: 'right-skewed', args: [N(1, null, N(2, null, N(3)))], expect: 3 },
+    { name: 'balanced, depth 3', args: [N(1, N(2, N(4), N(5)), N(3, N(6), N(7)))], expect: 3 },
+    { name: 'deeper on the right than the left', args: [N(1, N(2), N(3, N(4, N(5))))], expect: 4 },
+    { name: 'deep chain (1,500 nodes)', args: [chain(1500)], expect: 1500 }
   ],
   antiSolutions: [
-    { name: 'no sort, compares input neighbors only', code: 'function hasConflict(iv) { for (let i = 1; i < iv.length; i++) if (iv[i][0] < iv[i - 1][1]) return true; return false; }' },
-    { name: 'treats back-to-back as conflict', code: 'function hasConflict(iv) { const s = [...iv].sort((a, b) => a[0] - b[0]); for (let i = 1; i < s.length; i++) if (s[i][0] <= s[i - 1][1]) return true; return false; }' },
-    { name: 'sorts the caller’s array', code: 'function hasConflict(iv) { iv.sort((a, b) => a[0] - b[0]); for (let i = 1; i < iv.length; i++) if (iv[i][0] < iv[i - 1][1]) return true; return false; }' }
+    { name: 'counts edges, not nodes', code: 'function maxDepth(r) { if (!r) return -1; return 1 + Math.max(maxDepth(r.left), maxDepth(r.right)); }' },
+    { name: 'ignores the right subtree', code: 'function maxDepth(r) { if (!r) return 0; return 1 + maxDepth(r.left); }' }
   ],
   hints: [
-    '<p>Sort a copy by start time.</p>',
-    '<p><code>for (let i = 1; …) if (s[i][0] &lt; s[i-1][1]) return true;</code> then <code>return false</code>.</p>'
+    '<p>What is the depth of an empty tree? That’s your base case.</p>',
+    '<p><code>return 1 + Math.max(maxDepth(root.left), maxDepth(root.right))</code></p>'
   ],
   solution: `
-function hasConflict(intervals) {
-  const sorted = [...intervals].sort((a, b) => a[0] - b[0]);
-  for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i][0] < sorted[i - 1][1]) return true;   // strict: back-to-back is fine
-  }
-  return false;
+function maxDepth(root) {
+  if (root === null) return 0;
+  return 1 + Math.max(maxDepth(root.left), maxDepth(root.right));
 }`,
-  solutionExplain: '<p>Subtle point worth saying: comparing only with <code>i − 1</code> is enough because we return at the <em>first</em> conflict, so whenever we compare, everything before <code>i − 1</code> ended before <code>i − 1</code> started. For the “how many rooms do I need” variant that no longer holds — that one needs a min-heap of end times (Module 5).</p>',
-  complexity: '<p>“O(n log n) time from the sort, O(n) space for the copy.”</p>',
+  solutionExplain: '<p>Two lines. The iterative alternative is a BFS counting levels (next exercise) — worth mentioning when asked about very deep trees and stack limits.</p>',
+  complexity: '<p>“O(n) time — every node once — and O(h) stack space, where h is the height: log n if balanced, n if degenerate.”</p>',
   followUp: {
-    q: 'Follow-up: “What is the minimum number of rooms needed to hold all meetings?” Which structure appears?',
-    choices: ['Nothing new — count conflicts', 'A min-heap of end times: for each meeting (sorted by start), pop rooms that have ended, push this meeting’s end; the heap’s max size is the answer', 'A graph of overlapping meetings', 'A Set of start times'], answer: 1,
-    explain: '<p>The classic escalation from Module 4 to Module 5. The heap tracks “which ongoing meeting ends soonest” in O(log n).</p>'
+    q: 'Follow-up: nodes are now <code>{ val, children: [] }</code> (an org chart). What changes?',
+    choices: ['Everything — use BFS instead', 'Only the combine step: <code>1 + Math.max(0, ...node.children.map(maxDepth))</code>', 'You need a visited set now', 'Nothing at all'], answer: 1,
+    explain: '<p>The base case shifts to “no children → 1” (or keep null-check + <code>Math.max(0, …)</code> for the empty children list). The recursion shape survives the data-model change — that’s the interview lesson.</p>'
   }
 })}
 `
@@ -218,19 +102,128 @@ function hasConflict(intervals) {
 
       /* ------------------------------------------------ 4.2 ------ */
       {
+        type: 'read',
+        title: 'Level order — BFS on a tree',
+        minutes: 8,
+        html: `
+<p>“Print the org chart one management layer at a time”, “group nodes by depth” — that's BFS with one twist: you process the queue <em>one level at a time</em>. Snapshot the queue length at the start of each level, dequeue exactly that many, enqueue their children.</p>
+
+${diagram(`
+queue: [A]          → level 0 = [A],      enqueue B, C
+queue: [B, C]       → level 1 = [B, C],   enqueue D
+queue: [D]          → level 2 = [D]
+queue: []           → done`)}
+
+${widget('blanks', {
+  label: 'Complete the level loop',
+  q: 'The size snapshot is the whole trick.',
+  name: 'levels.js',
+  template: `
+function levels(root) {
+  if (!root) return [];
+  const result = [];
+  const queue = [root];
+  while (queue.length) {
+    const size = «0»;
+    const level = [];
+    for (let i = 0; i < size; i++) {
+      const node = queue.«1»();
+      level.push(node.val);
+      if (node.left) queue.push(node.left);
+      if (node.right) queue.push(node.right);
+    }
+    result.push(«2»);
+  }
+  return result;
+}`,
+  blanks: [
+    { choices: ['queue.length', 'result.length', 'level.length', '2'], answer: 0 },
+    { choices: ['shift', 'pop', 'at', 'slice'], answer: 0 },
+    { choices: ['level', 'node.val', 'queue', 'size'], answer: 0 }
+  ],
+  explain: '<p>Reading <code>queue.length</code> once, before the inner loop, is what separates levels — the children pushed during the loop belong to the <em>next</em> level. <code>shift</code> (front) makes it BFS; <code>pop</code> would make it a strange DFS.</p>'
+})}
+
+${widget('exercise', {
+  id: 'ex-4-2',
+  title: 'levels(root)',
+  time: 6,
+  fn: 'levels',
+  prompt: `<p>Return the values grouped by level, top to bottom, each level left to right. Empty tree → <code>[]</code>.</p>
+${code('js', 'example', `levels(tree)   // [["A"], ["B", "C"], ["D"]]   for the tree from 3.1`)}`,
+  reasoning: [
+    { cat: 'abstraction', q: 'Which graph traversal is “group by level”?', choices: ['DFS preorder', 'BFS — the queue naturally holds one level (plus part of the next) at a time', 'Inorder traversal', 'Sorting by depth'], answer: 1,
+      explain: '<p>Exactly the BFS from Module 3, with the level boundary made explicit. (DFS with a depth parameter also works: <code>result[depth].push(val)</code> — a fine alternative.)</p>' },
+    { cat: 'algorithm', q: 'How do you know where one level ends and the next begins?', choices: ['Nodes carry a depth field', 'Snapshot <code>queue.length</code> at the start of the level and dequeue exactly that many', 'Use a second queue for odd levels', 'Compare values'], answer: 1,
+      explain: '<p>Or push a sentinel <code>null</code> marker after each level. The snapshot is cleaner.</p>' },
+    { cat: 'complexity', q: 'Complexity?', choices: ['O(n) time, O(w) space where w is the widest level', 'O(n log n)', 'O(h)', 'O(n²)'], answer: 0,
+      explain: '<p>Every node enqueued once. The queue holds at most one full level — up to n/2 for a complete binary tree.</p>' }
+  ],
+  starter: `
+function levels(root) {
+  // BFS, one level at a time
+}`,
+  tests: [
+    { name: 'example', args: [N('A', N('B'), N('C', N('D')))], expect: [['A'], ['B', 'C'], ['D']] },
+    { name: 'empty tree', args: [null], expect: [] },
+    { name: 'single node', args: [N('A')], expect: [['A']] },
+    { name: 'full tree of 3 levels, left-to-right order', args: [N(1, N(2, N(4), N(5)), N(3, N(6), N(7)))], expect: [[1], [2, 3], [4, 5, 6, 7]] },
+    { name: 'left-skewed chain', args: [chain(4)], expect: [['n1'], ['n2'], ['n3'], ['n4']] },
+    { name: 'only right children', args: [N('r', null, N('s', null, N('t')))], expect: [['r'], ['s'], ['t']] },
+    { name: 'uneven levels', args: [N(1, N(2, null, N(5)), N(3, N(6, N(7)), null))], expect: [[1], [2, 3], [5, 6], [7]] }
+  ],
+  antiSolutions: [
+    { name: 'right before left', code: 'function levels(root) { if (!root) return []; const res = [], q = [root]; while (q.length) { const n = q.length, lvl = []; for (let i = 0; i < n; i++) { const x = q.shift(); lvl.push(x.val); if (x.right) q.push(x.right); if (x.left) q.push(x.left); } res.push(lvl); } return res; }' },
+    { name: 'flat BFS order, not grouped', code: 'function levels(root) { if (!root) return []; const out = [], q = [root]; while (q.length) { const x = q.shift(); out.push([x.val]); if (x.left) q.push(x.left); if (x.right) q.push(x.right); } return out; }' }
+  ],
+  hints: [
+    '<p>Start with the queue holding the root. Each outer iteration produces one level array.</p>',
+    '<p><code>const size = queue.length</code> before the inner loop; dequeue <code>size</code> nodes; push their non-null children.</p>'
+  ],
+  solution: `
+function levels(root) {
+  if (root === null) return [];
+  const result = [];
+  const queue = [root];
+  while (queue.length) {
+    const size = queue.length;          // nodes on this level
+    const level = [];
+    for (let i = 0; i < size; i++) {
+      const node = queue.shift();
+      level.push(node.val);
+      if (node.left) queue.push(node.left);
+      if (node.right) queue.push(node.right);
+    }
+    result.push(level);
+  }
+  return result;
+}`,
+  solutionExplain: '<p>Connect it back explicitly: this is Module 3’s BFS with the “distance rings” made visible. No visited set because a tree has no cycles — say that, it shows you know <em>why</em> the graph version needed one.</p>',
+  complexity: '<p>“O(n) time; O(w) extra space for the queue where w is the maximum level width.”</p>',
+  followUp: {
+    q: 'Follow-up: “Return the <em>rightmost</em> value of each level” (the right-side view). Change?',
+    choices: ['Reverse the tree first', 'Same loop; push only the last node of each level (<code>i === size - 1</code>)', 'Use DFS from the right', 'Sort each level'], answer: 1,
+    explain: '<p>Level order with a different “emit” rule. Many tree follow-ups are just changing what you collect per level.</p>'
+  }
+})}
+`
+      },
+
+      /* ------------------------------------------------ 4.3 ------ */
+      {
         type: 'quiz',
-        title: 'Quiz: intervals',
+        title: 'Quiz: trees',
         questions: [
-          { q: '<code>[[10,12],[9,11]].sort()</code> puts <code>[10,12]</code> first. Why?', choices: ['Because 10 &lt; 9 is true for arrays', 'The default sort compares string forms — <code>"10,12" &lt; "9,11"</code> lexicographically', 'Because sort is unstable', 'It doesn’t'], answer: 1,
-            explain: '<p>Always pass a numeric comparator.</p>' },
-          { q: 'Why sort before scanning intervals?', choices: ['To make output pretty', 'So an interval can only overlap the ones just before it, turning O(n²) pair checks into one O(n) pass', 'Sorting removes duplicates', 'JavaScript requires it'], answer: 1,
-            explain: '<p>The sort is what makes the single scan correct.</p>' },
-          { q: 'When merging, why <code>Math.max(cur.end, next.end)</code> rather than <code>next.end</code>?', choices: ['Performance', 'The next interval may be entirely inside the current one', 'To handle negative numbers', 'No reason'], answer: 1,
-            explain: '<p>Fully-contained intervals shrink the result otherwise.</p>' },
-          { q: 'The interviewer’s function must not modify its input array. Which is safe?', choices: ['<code>arr.sort(cmp)</code>', '<code>[...arr].sort(cmp)</code> or <code>arr.slice().sort(cmp)</code> or <code>arr.toSorted(cmp)</code>', '<code>arr.reverse().sort(cmp)</code>', '<code>Array.from(arr.sort(cmp))</code>'], answer: 1,
-            explain: '<p>Copy first; the last option sorts in place before copying.</p>' },
-          { q: 'Which requirement changes the overlap comparison from <code>&lt;=</code> to <code>&lt;</code>?', choices: ['Sorting descending', 'Whether touching ranges count as overlapping — a business rule to confirm, not guess', 'Using a heap', 'Negative intervals'], answer: 1,
-            explain: '<p>Say the convention before writing the condition.</p>' }
+          { q: 'Why don’t tree traversals need a <code>visited</code> set?', choices: ['They do', 'A tree has no cycles and each node has one parent, so following child pointers can never revisit a node', 'Because trees are small', 'Because recursion tracks it'], answer: 1,
+            explain: '<p>If the input might contain cycles or shared nodes (a DAG), it’s a graph again — bring the set back.</p>' },
+          { q: 'The most common tree-recursion bug is…', choices: ['Using the wrong traversal order', 'Missing the <code>null</code> base case, crashing on empty trees or missing children', 'Too much memory', 'Using Math.max'], answer: 1,
+            explain: '<p>Put <code>if (!node) return BASE</code> first, always.</p>' },
+          { q: 'Recursion depth is a concern when…', choices: ['The tree is balanced', 'The tree is very deep (a degenerate chain of ~10⁵ nodes) — the call stack can overflow; use an explicit stack/queue', 'The tree has many leaves', 'Never in JavaScript'], answer: 1,
+            explain: '<p>Stack space is O(h). Mention the iterative alternative when the interviewer asks about scale.</p>' },
+          { q: 'Level-order traversal is really…', choices: ['DFS with a counter', 'BFS with a per-level size snapshot', 'Sorting by depth', 'Inorder traversal'], answer: 1,
+            explain: '<p>Same queue as graph BFS.</p>' },
+          { q: '“Depth of the tree” — what should you do before coding?', choices: ['Assume edges', 'Assume nodes', 'Ask whether depth counts nodes or edges, and state the empty-tree answer under that convention', 'Return both'], answer: 2,
+            explain: '<p>A 5-second clarification that prevents an off-by-one argument later.</p>' }
         ]
       }
     ]

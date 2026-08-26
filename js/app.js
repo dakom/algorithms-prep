@@ -75,14 +75,14 @@
       return 'home';
     }
     const m = location.hash.match(/^#\/(\d+)\/(\d+)/);
-    if (m) {
-      const mi = Math.min(+m[1], MODULES.length - 1);
-      const si = Math.min(+m[2], MODULES[mi].sections.length - 1);
+    if (m) {   // URLs are 1-based (#/3/1 = module 3, section 1); indices are 0-based
+      const mi = Math.max(0, Math.min(+m[1] - 1, MODULES.length - 1));
+      const si = Math.max(0, Math.min(+m[2] - 1, MODULES[mi].sections.length - 1));
       return [mi, si];
     }
     return 'home';
   }
-  function go(mi, si) { location.hash = '#/' + mi + '/' + si; }
+  function go(mi, si) { location.hash = '#/' + (mi + 1) + '/' + (si + 1); }
   function flatIndex(mi, si) { let idx = 0; for (let i = 0; i < mi; i++) idx += MODULES[i].sections.length; return idx + si; }
   function fromFlat(idx) {
     for (let mi = 0; mi < MODULES.length; mi++) { if (idx < MODULES[mi].sections.length) return [mi, idx]; idx -= MODULES[mi].sections.length; }
@@ -113,7 +113,7 @@
       }).join('');
       const doneN = mod.sections.filter((_, si) => store.completed[secId(mi, si)]).length;
       return '<div class="nav-module' + (collapsed ? ' collapsed' : '') + (doneN === mod.sections.length ? ' complete' : '') + '" data-mi="' + mi + '">' +
-        '<button class="nav-module-title"><span class="nav-module-num">' + mi + '</span><span class="nav-module-text">' + esc(mod.title) + '</span>' +
+        '<button class="nav-module-title"><span class="nav-module-num">' + (mi + 1) + '</span><span class="nav-module-text">' + esc(mod.title) + '</span>' +
         '<span class="nav-module-min">' + (mod.minutes ? mod.minutes + 'm' : '') + '</span><span class="chev">▼</span></button>' +
         '<div class="nav-sections">' + sections + '</div></div>';
     }).join('');
@@ -145,9 +145,9 @@
     const nextUp = exs.find(e => exStatus(e.cfg) === 'Not started');
 
     let html = '<div class="home-hero"><div><div class="home-kicker">Coding interview prep: patterns first</div><h1>Pattern recognition, then execution.</h1>' +
-      '<p class="home-lede">Eight modules, ~3 hours. Every exercise forces the interview loop: <em>identify the abstraction → choose the structure → explain → estimate complexity → implement → test → handle the follow-up.</em> Reading is kept short; the learning is in the doing.</p>' +
+      '<p class="home-lede">Eight core modules, ~3 hours. Every exercise forces the interview loop: <em>identify the abstraction → choose the structure → explain → estimate complexity → implement → test → handle the follow-up.</em> Reading is kept short; the learning is in the doing.</p>' +
       '<div class="home-cta">' +
-      (resume ? '<button class="primary" data-go="' + resume.join('/') + '">▶ Resume: ' + esc(MODULES[resume[0]].sections[resume[1]].title) + '</button>' : '<button class="primary" data-go="0/0">▶ Start Module 0</button>') +
+      (resume ? '<button class="primary" data-go="' + resume.join('/') + '">▶ Resume: ' + esc(MODULES[resume[0]].sections[resume[1]].title) + '</button>' : '<button class="primary" data-go="0/0">▶ Start Module 1</button>') +
       (inProgress ? '<button class="ghost" data-go="' + inProgress.mi + '/' + inProgress.si + '">Continue exercise: ' + esc(inProgress.cfg.title) + '</button>' : nextUp && resume ? '<button class="ghost" data-go="' + nextUp.mi + '/' + nextUp.si + '">Next exercise: ' + esc(nextUp.cfg.title) + '</button>' : '') +
       '</div></div>' +
       '<div class="home-stats"><div class="stat"><div class="stat-n">' + pct + '%</div><div class="stat-l">sections done</div></div>' +
@@ -155,14 +155,14 @@
       '<div class="stat"><div class="stat-n">' + (avg === null ? '–' : avg) + '</div><div class="stat-l">avg rubric score</div></div>' +
       '<div class="stat"><div class="stat-n">' + fmtMin(spent) + '</div><div class="stat-l">on exercises · budget ' + budget + ' min</div></div></div></div>';
 
-    html += '<h2>The path</h2><p class="dim">Recommended order top to bottom. Skipping is fine — Module 2 (graphs) and Module 6 (stateful implementation) matter most if you must triage.</p>';
+    html += '<h2>The path</h2><p class="dim">Recommended order top to bottom. Skipping is fine — Module 3 (graphs) and Module 7 (stateful implementation) matter most if you must triage.</p>';
     html += '<div class="home-modules">' + MODULES.map((m, mi) => {
       const secDone = m.sections.filter((_, si) => store.completed[secId(mi, si)]).length;
       const mexs = exs.filter(e => e.mi === mi);
       const mdone = mexs.filter(e => exStatus(e.cfg) === 'Complete').length;
       const first = (() => { for (let si = 0; si < m.sections.length; si++) if (!store.completed[secId(mi, si)]) return si; return 0; })();
       return '<div class="home-mod' + (secDone === m.sections.length ? ' complete' : secDone ? ' started' : '') + '" data-go="' + mi + '/' + first + '">' +
-        '<div class="home-mod-num">' + mi + '</div><div class="home-mod-body"><div class="home-mod-title">' + esc(m.title) + '</div><div class="home-mod-sub">' + esc(m.blurb || '') + '</div>' +
+        '<div class="home-mod-num">' + (mi + 1) + '</div><div class="home-mod-body"><div class="home-mod-title">' + esc(m.title) + '</div><div class="home-mod-sub">' + esc(m.blurb || '') + '</div>' +
         '<div class="home-mod-bar"><span style="width:' + (100 * secDone / m.sections.length) + '%"></span></div></div>' +
         '<div class="home-mod-meta"><span>' + (m.minutes ? '~' + m.minutes + ' min' : m.optional ? 'optional' : '') + '</span><span>' + secDone + '/' + m.sections.length + ' sections</span>' + (mexs.length ? '<span>' + mdone + '/' + mexs.length + ' exercises</span>' : '') + '</div></div>';
     }).join('') + '</div>';
@@ -170,7 +170,7 @@
     html += '<h2>Exercise board</h2><div class="ex-board">' + exs.map(e => {
       const s = exStatus(e.cfg), sc = window.Exercise.score(e.cfg, store);
       const el = (store.ex[e.cfg.id] || {}).elapsed;
-      return '<div class="ex-board-row" data-go="' + e.mi + '/' + e.si + '"><span class="ex-status ' + s.toLowerCase().replace(/\s/g, '-') + '">' + s + '</span><span class="ex-board-title">' + esc(e.cfg.title) + '</span><span class="ex-board-mod">M' + e.mi + '</span>' +
+      return '<div class="ex-board-row" data-go="' + e.mi + '/' + e.si + '"><span class="ex-status ' + s.toLowerCase().replace(/\s/g, '-') + '">' + s + '</span><span class="ex-board-title">' + esc(e.cfg.title) + '</span><span class="ex-board-mod">M' + (e.mi + 1) + '</span>' +
         '<span class="ex-board-time">' + (el ? fmtMin(el) : '') + (e.cfg.time ? ' <span class="dim">/ ' + e.cfg.time + '</span>' : '') + '</span><span class="ex-board-score">' + (sc === null ? '' : sc + '<span class="dim">/100</span>') + '</span></div>';
     }).join('') + '</div>';
 
@@ -196,7 +196,7 @@
     store.last = id; save();
     $('#pager').style.display = '';
     const hasState = store.completed[id] || store.quiz[id] || store.checks[id] || (store.widgets[id] && Object.keys(store.widgets[id]).length);
-    let html = '<div class="section-breadcrumb"><span>Module ' + mi + ' · ' + esc(mod.title) + '</span>' + typeChip(sec.type) +
+    let html = '<div class="section-breadcrumb"><span>Module ' + (mi + 1) + ' · ' + esc(mod.title) + '</span>' + typeChip(sec.type) +
       (sec.minutes ? '<span class="sec-min">~' + sec.minutes + ' min</span>' : '') +
       (hasState ? '<button id="clear-section-btn" title="Clear quiz answers, widgets and completion for this section (exercises keep their own state)">↺ Clear section</button>' : '') + '</div>';
     html += '<h1>' + esc(sec.title) + '</h1>';

@@ -22,8 +22,8 @@ scores persist in `localStorage` under `algo-prep-v1`.
 
 ## What's inside
 
-- **10 modules · 36 sections**, ~3 hours on the recommended path (Modules 0–7),
-  plus optional bonus topics (Module 8) and cheat sheets (Module 9).
+- **10 modules · 36 sections**, ~3 hours on the recommended path (Modules 1–8),
+  plus optional bonus topics (Module 9) and cheat sheets (Module 10).
 - **17 staged exercises**. Each one gates the editor behind reasoning questions
   (abstraction, algorithm, complexity, edge cases, a free-text "say it out loud"
   compared against a model answer), then runs your code against hidden tests
@@ -87,7 +87,7 @@ js/editor.js          lightweight code editor
 js/exercise.js        staged exercise widget, rubric scoring
 js/widgets.js         mcq / multi / order / blanks / spotbug / repl / drill / trace
 js/app.js             routing, sidebar, dashboard, quizzes, persistence
-js/content/m0..m9.js  content modules
+js/content/m1..m10.js  content modules
 tools/selfcheck.js    offline verification of all exercises and widgets
 ```
 
