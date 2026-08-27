@@ -154,20 +154,25 @@
       body = logsHtml(logs);
       if (out && out.error) body += '<div class="repl-line repl-err">✖ ' + esc(out.error) + locHtml(out.errorLoc) + '</div>';
       if (out && out.timedOut) body += '<div class="repl-line repl-warn">⏱ Timed out after ' + (window.Runner.TIMEOUT_MS / 1000) + 's — probably an infinite loop' + (logs.length ? '; the lines above are what printed before it hung.' : '.') + '</div>';
-      if (!body) body = '<div class="repl-line repl-dim">' + (out && out.hint ? esc(out.hint) : '(no output) — add console.log(…) anywhere in your code to print values here') + '</div>';
+      if (!body) body = '<div class="repl-line repl-dim">' + (out && out.hint ? esc(out.hint) : '(no output) — nothing called console.log. Run code executes the file top-to-bottom, so a function that is only defined never runs: call it at the bottom, e.g. console.log(myFn(…)).') + '</div>';
     }
     el.innerHTML = '<div class="repl-out-head"><span>console</span>' + (logs.length ? '<span>' + logs.length + ' line' + (logs.length > 1 ? 's' : '') + '</span>' : '') + '</div>' + body;
     el.classList.toggle('has-error', !!(out && (out.error || out.timedOut)));
     wireLineLinks(el, editor);
   }
-  /* Run the learner's file top-to-bottom (no tests) and show its console output.
-     o: { code (editor text), prelude?, panel, editor?, btn? } → Promise */
+  /* Run the learner's file top-to-bottom (no tests) and show its console output. If the
+     file never calls the exercise's function, it is called with the first test's input.
+     o: { code (editor text), prelude?, panel, editor?, btn?, fn?, tests?, isClass? } → Promise */
+  function sampleArgs(tests) {
+    const t = (tests || []).find(t => Array.isArray(t.args) && !t.run);
+    return t ? t.args : null;
+  }
   function scratch(o) {
     const lineOffset = preludeOffset(o.prelude);
     const full = (o.prelude ? window.T.trim(o.prelude) + '\n\n' : '') + o.code;
     if (o.btn) { o.btn.disabled = true; }
     paintConsole(o.panel, { running: true });
-    return window.Runner.run({ mode: 'scratch', spec: { code: full, lineOffset } }, {
+    return window.Runner.run({ mode: 'scratch', spec: { code: full, lineOffset, fn: o.fn, sampleArgs: sampleArgs(o.tests), isClass: !!o.isClass } }, {
       onResult: () => {},
       onTimeout: () => {},
       onDone: summary => {
@@ -184,7 +189,7 @@
       }
     });
   }
-  const CONSOLE_HINT = '▶ Run code executes your whole file (no tests) and prints console.log output here — errors show the line.';
+  const CONSOLE_HINT = '▶ Run code executes your whole file (no tests) and prints console.log output here — errors show the line. If the file never calls the function, it’s called for you with the first test’s input.';
 
   /* repaint just the ✓ marks on the step tabs after a run, without re-rendering the editor */
   function refreshStepper(body, cfg, st, si) {
@@ -397,7 +402,7 @@
     function runScratch() {
       if (scratching) return;
       scratching = true;
-      scratch({ code: ed.value, prelude: cfg.prelude, panel: consoleEl, editor: ed, btn: body.querySelector('[data-act=scratch]') }).then(() => { scratching = false; });
+      scratch({ code: ed.value, prelude: cfg.prelude, panel: consoleEl, editor: ed, btn: body.querySelector('[data-act=scratch]'), fn: fnName, tests: stage.tests, isClass: !!(stage.isClass || cfg.isClass) }).then(() => { scratching = false; });
     }
     body.querySelector('[data-act=scratch]').addEventListener('click', runScratch);
     paintContinue();

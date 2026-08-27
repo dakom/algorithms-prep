@@ -354,16 +354,33 @@ function RUNNER_CORE() {
     return { differ, args: fmt(args) };
   }
 
-  /* runScratch: just execute the learner's code, top to bottom, with console
-     capture — no tests. For poking at values: console.log(myFn([1, 2, 3])). */
+  /* runScratch: execute the learner's file top to bottom with console capture — no
+     tests. If the file only *defines* spec.fn and never calls it, call it with
+     spec.sampleArgs (the first test's input) so "Run code" always shows something.
+     spec: { code, lineOffset?, fn?, sampleArgs?, isClass? } */
   function runScratch(spec, emit, opts) {
     const logs = [];
     captureConsole(logs);
-    let error = null, errorLoc = null, syntax = false;
-    try { loadSymbol(spec.code, '__scratch__', opts); }
+    let error = null, errorLoc = null, syntax = false, called = null;
+    let fn;
+    try { fn = spec.fn ? loadSymbol(spec.code, spec.fn, opts) : undefined; }
     catch (e) { error = errText(e); errorLoc = errLoc(e, spec, opts); syntax = e instanceof SyntaxError; }
+    if (!error && spec.fn && spec.sampleArgs && !spec.isClass && typeof fn === 'function' && !callsItself(spec.code, spec.fn)) {
+      called = spec.fn + '(' + spec.sampleArgs.map(a => fmt(a)).join(', ') + ')';
+      logLine('log', ['▶ ' + called + '   ← called for you with the first test’s input (your file never calls ' + spec.fn + ')']);
+      try { logLine('log', ['→ returned ' + fmt(fn(...clone(spec.sampleArgs)))]); }
+      catch (e) { error = errText(e); errorLoc = errLoc(e, spec, opts); }
+    } else if (!error && spec.fn && typeof fn !== 'function') {
+      logLine('warn', ['`' + spec.fn + '` is not defined — keep the name exactly `' + spec.fn + '`']);
+    }
     releaseConsole();
-    return { logs, error, errorLoc, syntax };
+    return { logs, error, errorLoc, syntax, called };
+  }
+  /* does the code call `name` anywhere other than its own definition? */
+  function callsItself(code, name) {
+    const stripped = code.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
+    const re = new RegExp('(?<!\\bfunction\\s+)(?<![\\w$.])' + name.replace(/\$/g, '\\$') + '\\s*\\(', 'g');
+    return re.test(stripped);
   }
 
   G.RunnerCore = { fmt, deepEqual, clone, runSuite, runOwn, runBreak, runScratch, guardLoops, loadSymbol, loadSymbols, errText, errLoc, hooks };

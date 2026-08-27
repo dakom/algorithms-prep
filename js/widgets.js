@@ -494,7 +494,7 @@
     function runScratch() {
       if (scratching) return;
       scratching = true;
-      window.Exercise.scratch({ code: ed.value, prelude: cfg.prelude, panel: consoleEl, editor: ed, btn: el.querySelector('[data-act=scratch]') }).then(() => { scratching = false; });
+      window.Exercise.scratch({ code: ed.value, prelude: cfg.prelude, panel: consoleEl, editor: ed, btn: el.querySelector('[data-act=scratch]'), fn: cfg.fn, tests: cfg.tests, isClass: !!cfg.isClass }).then(() => { scratching = false; });
     }
     el.querySelector('[data-act=scratch]').addEventListener('click', runScratch);
     function paintAfter() {
