@@ -134,23 +134,69 @@ function RUNNER_CORE() {
     while ((m = re.exec(code)) !== null) names.add(m[1] || m[2]);
     const body = (opts && opts.guard ? guardLoops(code) : code) + '\n;return {' +
       Array.from(names).map(n => JSON.stringify(n) + ': (typeof ' + n + ' === "undefined" ? undefined : ' + n + ')').join(',') + '};';
-    try { return new Function(body)(); } catch (e) { return {}; }
+    captureConsole([]);   // top-level code runs again here; don't report its output twice
+    try { return new Function(body)(); } catch (e) { return {}; } finally { releaseConsole(); }
   }
 
-  /* ---------- console capture ---------- */
+  /* ---------- console capture ----------
+     Learner output is collected per test (and during load, for top-level code) and
+     also streamed through hooks.onLog so the host can show it even if the run is
+     killed by the timeout a moment later. */
+  const MAX_LOGS = 200;
+  const hooks = { onLog: null };
   let sink = null;
   const realConsole = G.console;
+  function logLine(level, a) {
+    if (!sink) return;
+    if (sink.length >= MAX_LOGS) {
+      if (sink.length === MAX_LOGS) { sink.push('… output truncated after ' + MAX_LOGS + ' lines'); if (hooks.onLog) hooks.onLog(sink[sink.length - 1]); }
+      return;
+    }
+    const text = (level === 'warn' ? '⚠ ' : level === 'error' ? '✖ ' : '') + a.map(x => typeof x === 'string' ? x : fmt(x)).join(' ');
+    sink.push(text);
+    if (hooks.onLog) hooks.onLog(text);
+  }
   function captureConsole(logs) {
     sink = logs;
     G.console = Object.assign(Object.create(realConsole), {
-      log: (...a) => { if (sink && sink.length < 100) sink.push(a.map(x => typeof x === 'string' ? x : fmt(x)).join(' ')); },
-      info: (...a) => G.console.log(...a),
-      warn: (...a) => G.console.log(...a),
-      error: (...a) => G.console.log(...a),
-      debug: (...a) => G.console.log(...a)
+      log: (...a) => logLine('log', a),
+      info: (...a) => logLine('log', a),
+      debug: (...a) => logLine('log', a),
+      dir: (...a) => logLine('log', a),
+      table: (...a) => logLine('log', a),
+      warn: (...a) => logLine('warn', a),
+      error: (...a) => logLine('error', a)
     });
   }
   function releaseConsole() { sink = null; G.console = realConsole; }
+
+  /* ---------- error locations ----------
+     Code is built with new Function(), whose stack frames show up as
+     "<anonymous>:LINE:COL" (Chrome) or "Function:LINE:COL" (Firefox) with a
+     browser-specific header offset — measure it once, then report editor lines. */
+  let fnLineOffset = null;
+  function stackLoc(stack) {
+    if (!stack) return null;
+    const m = /<anonymous>:(\d+):(\d+)/.exec(stack) || /\bFunction:(\d+):(\d+)/.exec(stack);
+    return m ? { line: +m[1], col: +m[2] } : null;
+  }
+  function calibrate() {
+    if (fnLineOffset !== null) return;
+    fnLineOffset = 0;
+    try { new Function('\n\nthrow new Error("calibrate");')(); }
+    catch (e) { const l = stackLoc(e.stack); if (l) fnLineOffset = l.line - 3; }
+  }
+  /* line/col of `e` inside the learner's editor, or null if unknown.
+     spec.lineOffset = lines of provided code prepended before the editor text. */
+  function errLoc(e, spec, opts) {
+    if (!(e instanceof Error)) return null;
+    calibrate();
+    const l = stackLoc(e.stack);
+    if (!l) return null;
+    const line = l.line - fnLineOffset - (opts && opts.guard ? 1 : 0) - ((spec && spec.lineOffset) || 0);
+    if (line < 1) return { line: null, col: null, provided: true };
+    return { line, col: l.col, provided: false };
+  }
 
   function errText(e) {
     if (!(e instanceof Error)) return 'threw ' + fmt(e);
@@ -160,9 +206,9 @@ function RUNNER_CORE() {
   }
 
   /* ---------- one test ---------- */
-  function runOne(fn, test, H, opts) {
+  function runOne(fn, test, H, opts, spec) {
     const logs = [];
-    const res = { name: test.name, pass: false, actual: '', expected: '', error: null, logs, note: null };
+    const res = { name: test.name, pass: false, actual: '', expected: '', error: null, errorLoc: null, logs, note: null };
     captureConsole(logs);
     let actual, threw = false, args = test.args ? clone(test.args) : [];
     const before = test.noMutate ? fmt(args) : null;
@@ -180,9 +226,10 @@ function RUNNER_CORE() {
         return res;
       }
       res.error = errText(e);
+      res.errorLoc = errLoc(e, spec, opts);
     }
     releaseConsole();
-    if (threw) { res.expected = test.expectThrow ? 'throws' : ('expected' in test ? fmt(test.expect) : (test.expectedText || 'a value')); return res; }
+    if (threw) { res.expected = test.expectThrow ? 'throws' : ('expect' in test ? fmt(test.expect) : (test.expectedText || 'a value')); return res; }
     if (test.expectThrow) {
       res.pass = false; res.actual = 'returned ' + fmt(actual); res.expected = 'throws';
       return res;
@@ -217,33 +264,41 @@ function RUNNER_CORE() {
   }
   function loadUser(spec, opts) {
     let fn;
+    const logs = [];
+    captureConsole(logs);
     try { fn = loadSymbol(spec.code, spec.fn, opts); }
-    catch (e) { return { error: 'Your code failed to load — ' + errText(e) }; }
-    if (fn === undefined) return { error: 'Could not find `' + spec.fn + '` — keep the ' + (spec.isClass ? 'class' : 'function') + ' name exactly `' + spec.fn + '`.' };
-    if (spec.isClass ? typeof fn !== 'function' : typeof fn !== 'function') return { error: '`' + spec.fn + '` is not a ' + (spec.isClass ? 'class' : 'function') + '.' };
-    return { fn };
+    catch (e) {
+      releaseConsole();
+      const loc = errLoc(e, spec, opts);
+      const syntax = e instanceof SyntaxError;
+      return { error: (syntax ? 'Your code has a syntax error — ' : 'Your code threw while loading (top-level code, outside any function) — ') + errText(e), errorLoc: loc, syntax, logs };
+    }
+    releaseConsole();
+    if (fn === undefined) return { error: 'Could not find `' + spec.fn + '` — keep the ' + (spec.isClass ? 'class' : 'function') + ' name exactly `' + spec.fn + '`.', logs };
+    if (spec.isClass ? typeof fn !== 'function' : typeof fn !== 'function') return { error: '`' + spec.fn + '` is not a ' + (spec.isClass ? 'class' : 'function') + '.', logs };
+    return { fn, logs };
   }
 
   /* runSuite: runs hidden tests; calls emit(index, result) after each; returns summary */
   function runSuite(spec, emit, opts) {
     const H = buildHelpers(spec);
     const load = loadUser(spec, opts);
-    if (load.error) { return { loadError: load.error }; }
+    if (load.error) { return { loadError: load.error, loadErrorLoc: load.errorLoc, syntax: !!load.syntax, loadLogs: load.logs }; }
     H.fns = loadSymbols(spec.code, opts);
     let passed = 0;
     for (let i = 0; i < spec.tests.length; i++) {
-      const r = runOne(load.fn, spec.tests[i], H, opts);
+      const r = runOne(load.fn, spec.tests[i], H, opts, spec);
       if (r.pass) passed++;
       emit(i, r);
     }
-    return { passed, total: spec.tests.length };
+    return { passed, total: spec.tests.length, loadLogs: load.logs };
   }
 
   /* runOwn: the learner's own tests, validated against the reference solution */
   function runOwn(spec, emit, opts) {
     const H = buildHelpers(spec);
     const load = loadUser(spec, opts);
-    if (load.error) return { loadError: load.error };
+    if (load.error) return { loadError: load.error, loadErrorLoc: load.errorLoc, syntax: !!load.syntax, loadLogs: load.logs };
     H.fns = loadSymbols(spec.code, opts);
     let ref;
     try { ref = loadSymbol(spec.refCode, spec.fn); } catch (e) { return { loadError: 'internal: reference failed to load: ' + errText(e) }; }
@@ -259,22 +314,24 @@ function RUNNER_CORE() {
       if (!('expect' in t)) { r.error = 'each test needs an `expect` value'; emit(i, r); return; }
       // 1. is the learner's expectation actually right? (reference / checker decides)
       let refOut;
+      captureConsole([]);   // the reference's own logging isn't the learner's output
       try { refOut = ref(...clone(t.args)); r.refActual = fmt(refOut); }
-      catch (e) { r.error = 'reference threw on these args: ' + errText(e); emit(i, r); return; }
+      catch (e) { releaseConsole(); r.error = 'reference threw on these args: ' + errText(e); emit(i, r); return; }
+      releaseConsole();
       if (spec.checkSrc) {
         let v; try { v = rebuild(spec.checkSrc)(t.expect, clone(t.args), H); } catch (e) { v = false; }
         r.expectOk = !!(v && (typeof v !== 'object' || v.ok));
       } else r.expectOk = deepEqual(t.expect, refOut, !!spec.unordered);
       // 2. does the learner's function pass it?
-      const one = runOne(load.fn, { name: r.name, args: t.args, expect: t.expect, checkSrc: spec.checkSrc, unordered: spec.unordered, expectedText: fmt(t.expect) }, H, opts);
-      r.pass = one.pass; r.actual = one.actual; r.expected = fmt(t.expect); r.error = one.error;
+      const one = runOne(load.fn, { name: r.name, args: t.args, expect: t.expect, checkSrc: spec.checkSrc, unordered: spec.unordered, expectedText: fmt(t.expect) }, H, opts, spec);
+      r.pass = one.pass; r.actual = one.actual; r.expected = fmt(t.expect); r.error = one.error; r.errorLoc = one.errorLoc; r.logs = one.logs;
       if (r.expectOk && r.pass) valid++;
       if (r.expectOk && r.pass) (spec.coverage || []).forEach((c, ci) => {
         try { if (rebuild(c.hitSrc)(clone(t.args))) coverage[ci].hit = true; } catch (e) { /* ignore */ }
       });
       emit(i, r);
     });
-    return { valid, total: tests.length, coverage };
+    return { valid, total: tests.length, coverage, loadLogs: load.logs };
   }
 
   /* runBreak: the learner supplies arguments that should make a buggy implementation
@@ -297,6 +354,18 @@ function RUNNER_CORE() {
     return { differ, args: fmt(args) };
   }
 
-  G.RunnerCore = { fmt, deepEqual, clone, runSuite, runOwn, runBreak, guardLoops, loadSymbol, loadSymbols, errText };
+  /* runScratch: just execute the learner's code, top to bottom, with console
+     capture — no tests. For poking at values: console.log(myFn([1, 2, 3])). */
+  function runScratch(spec, emit, opts) {
+    const logs = [];
+    captureConsole(logs);
+    let error = null, errorLoc = null, syntax = false;
+    try { loadSymbol(spec.code, '__scratch__', opts); }
+    catch (e) { error = errText(e); errorLoc = errLoc(e, spec, opts); syntax = e instanceof SyntaxError; }
+    releaseConsole();
+    return { logs, error, errorLoc, syntax };
+  }
+
+  G.RunnerCore = { fmt, deepEqual, clone, runSuite, runOwn, runBreak, runScratch, guardLoops, loadSymbol, loadSymbols, errText, errLoc, hooks };
 }
 if (typeof module !== 'undefined' && module.exports) { RUNNER_CORE(); module.exports = globalThis.RunnerCore; }

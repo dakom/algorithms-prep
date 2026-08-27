@@ -37,7 +37,11 @@
     ta.addEventListener('input', () => { paint(); if (opts.onChange) opts.onChange(ta.value); });
     ta.addEventListener('scroll', sync);
     ta.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); if (opts.onRun) opts.onRun(); return; }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        if (e.shiftKey && opts.onRunAlt) opts.onRunAlt(); else if (opts.onRun) opts.onRun();
+        return;
+      }
       if (ta.readOnly) return;
       const s = ta.selectionStart, en = ta.selectionEnd, v = ta.value;
       if (e.key === 'Tab') {
@@ -93,6 +97,20 @@
       get value() { return ta.value; },
       set value(v) { ta.value = v; paint(); },
       focus() { ta.focus(); },
+      /* put the caret at the start of 1-based line n and scroll it into view */
+      gotoLine(n) {
+        const lines = ta.value.split('\n');
+        let idx = 0;
+        for (let i = 0; i < Math.min(n - 1, lines.length - 1); i++) idx += lines[i].length + 1;
+        const firstNonSpace = (lines[Math.min(n, lines.length) - 1] || '').search(/\S/);
+        idx += firstNonSpace > 0 ? firstNonSpace : 0;
+        ta.focus();
+        ta.selectionStart = ta.selectionEnd = idx;
+        const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+        const y = (n - 1) * lh;
+        host.scrollIntoView({ block: 'nearest' });
+        if (y < ta.scrollTop || y > ta.scrollTop + ta.clientHeight - lh) ta.scrollTop = Math.max(0, y - ta.clientHeight / 2);
+      },
       textarea: ta,
       setReadOnly(ro) { ta.readOnly = !!ro; host.classList.toggle('readonly', !!ro); }
     };

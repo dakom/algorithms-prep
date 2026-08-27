@@ -136,7 +136,7 @@ ${callout('say', 'The sentence to say', `<p>“I'll index the ___ in a Map/Set s
         title: 'Exercise 2.1 — Duplicate transactions',
         minutes: 5,
         html: `
-<p>Your first full run of the loop. The editor stays locked until the reasoning is done — that mirrors the interview, where you'd be talking before typing.</p>
+<p>Your first full run of the loop. Do the reasoning before you open the editor — that mirrors the interview, where you'd be talking before typing. (Nothing is locked; the step tabs jump anywhere.)</p>
 
 ${widget('exercise', {
   id: 'ex-2-1',

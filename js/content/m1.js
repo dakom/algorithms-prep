@@ -20,7 +20,7 @@
 
 <h2>What you'll be doing</h2>
 <div class="two-col">
-<div class="card"><h4>🧪 Exercises (the core)</h4><p>Each one is a small interview. You must answer reasoning questions to <strong>unlock the editor</strong>, then code against hidden tests (with progressive hints), then write your <strong>own</strong> tests — which are validated against a reference solution — then review the reference and handle a follow-up. You get a rubric score out of 100 that weights reasoning over syntax.</p></div>
+<div class="card"><h4>🧪 Exercises (the core)</h4><p>Each one is a small interview in four steps — reason, code against hidden tests (with progressive hints), write your <strong>own</strong> tests — which are validated against a reference solution — then review the reference and handle a follow-up. The step tabs are freely navigable (a ✓ marks steps you’ve worked through), and the rubric score out of 100 that weights reasoning over syntax.</p></div>
 <div class="card"><h4>🏗 Projects & 🎤 mock interview</h4><p>Module 7 evolves an in-memory ledger through five requirement changes in one editor — the "implement a small service" style interview. Module 8 is a timed, multi-part problem where the pattern is <em>not</em> announced.</p></div>
 <div class="card"><h4>🔍 Visual traces & ⚡ drills</h4><p>Step through BFS/DFS on a real graph by predicting the next node. Finish with a timed pattern-recognition drill: read a prompt, name the approach in 20 seconds.</p></div>
 <div class="card"><h4>💾 Progress</h4><p>Everything persists in this browser (localStorage): code, answers, scores, timers. The dashboard (⌂) shows the exercise board. ← / → keys move between sections.</p></div>

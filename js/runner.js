@@ -7,8 +7,10 @@
     'onmessage = function (e) {\n' +
     '  const spec = e.data.spec;\n' +
     '  const emit = (index, result) => postMessage({ type: "result", index, result });\n' +
+    '  RunnerCore.hooks.onLog = text => postMessage({ type: "log", text });\n' +
+    '  const M = { own: RunnerCore.runOwn, break: RunnerCore.runBreak, scratch: RunnerCore.runScratch };\n' +
     '  let summary;\n' +
-    '  try { summary = e.data.mode === "own" ? RunnerCore.runOwn(spec, emit) : e.data.mode === "break" ? RunnerCore.runBreak(spec, emit) : RunnerCore.runSuite(spec, emit); }\n' +
+    '  try { summary = (M[e.data.mode] || RunnerCore.runSuite)(spec, emit); }\n' +
     '  catch (err) { summary = { loadError: "internal runner error: " + (err && err.message) }; }\n' +
     '  postMessage({ type: "done", summary });\n' +
     '};';
@@ -43,10 +45,14 @@
     });
   }
 
-  /* run({ mode:'suite'|'own', spec }, { onResult(i, r), onDone(summary), onTimeout(i) })
-     spec (suite): { code, fn, isClass, harness?, tests }
-     spec (own):   { code, refCode, fn, harness?, ownSrc, check?, unordered?, coverage? }
-     Resolves to summary. Per-test timeout: TIMEOUT_MS. Returns a handle with cancel(). */
+  /* run({ mode:'suite'|'own'|'break'|'scratch', spec }, { onResult(i, r), onDone(summary), onTimeout(i, logsSoFar) })
+     spec (suite):   { code, fn, isClass, harness?, tests, lineOffset? }
+     spec (own):     { code, refCode, fn, harness?, ownSrc, check?, unordered?, coverage?, lineOffset? }
+     spec (scratch): { code, lineOffset? }  — just runs the code and collects console output
+     lineOffset = number of provided-code lines prepended before the learner's editor text,
+     so error locations come back as editor line numbers.
+     Resolves to summary. Per-test timeout: TIMEOUT_MS. On timeout, the console lines the
+     killed test had printed so far are passed to onTimeout and put on summary.logs. */
   const TIMEOUT_MS = 2500;
   function run(job, cb) {
     const spec = Object.assign({}, job.spec);
@@ -62,11 +68,9 @@
       return new Promise(resolve => {
         setTimeout(() => {
           let summary;
-          try {
-            summary = job.mode === 'own' ? RunnerCore.runOwn(spec, cb.onResult, { guard: true })
-              : job.mode === 'break' ? RunnerCore.runBreak(spec, cb.onResult, { guard: true })
-              : RunnerCore.runSuite(spec, cb.onResult, { guard: true });
-          } catch (e) { summary = { loadError: 'runner error: ' + e.message }; }
+          const M = { own: RunnerCore.runOwn, break: RunnerCore.runBreak, scratch: RunnerCore.runScratch };
+          try { summary = (M[job.mode] || RunnerCore.runSuite)(spec, cb.onResult, { guard: true }); }
+          catch (e) { summary = { loadError: 'runner error: ' + e.message }; }
           summary.fallback = true;
           cb.onDone(summary);
           resolve(summary);
@@ -75,15 +79,15 @@
     }
 
     return new Promise(resolve => {
-      let nextIndex = 0, timer = null, finished = false;
+      let nextIndex = 0, timer = null, finished = false, pendingLogs = [];
       const arm = () => {
         clearTimeout(timer);
         timer = setTimeout(() => {
           if (finished) return;
           finished = true;
           w.terminate();
-          const summary = { timedOut: true, timedOutIndex: nextIndex };
-          cb.onTimeout(nextIndex);
+          const summary = { timedOut: true, timedOutIndex: nextIndex, logs: pendingLogs };
+          cb.onTimeout(nextIndex, pendingLogs);
           cb.onDone(summary);
           resolve(summary);
         }, TIMEOUT_MS);
@@ -91,7 +95,8 @@
       w.onmessage = e => {
         if (finished) return;
         const m = e.data;
-        if (m.type === 'result') { nextIndex = m.index + 1; cb.onResult(m.index, m.result); arm(); }
+        if (m.type === 'log') { pendingLogs.push(m.text); return; }
+        if (m.type === 'result') { nextIndex = m.index + 1; pendingLogs = []; cb.onResult(m.index, m.result); arm(); }
         else if (m.type === 'done') {
           finished = true; clearTimeout(timer); w.terminate();
           cb.onDone(m.summary); resolve(m.summary);
@@ -108,5 +113,40 @@
     });
   }
 
-  window.Runner = { run, TIMEOUT_MS };
+  /* new Function() reports syntax errors without a position. Loading the same code as a
+     <script> (wrapped in a never-called function so nothing executes) makes the browser
+     report the error through window.onerror WITH a line number. Resolves to
+     { message, line, col } or null (not a syntax error / browser gave no position). */
+  function locateSyntaxError(code, lineOffset) {
+    return new Promise(resolve => {
+      let found = null, url = null, done = false;
+      const finish = () => {
+        if (done) return; done = true;
+        window.removeEventListener('error', onErr, true);
+        if (url) URL.revokeObjectURL(url);
+        if (found && found.line !== null) {
+          const last = code.split('\n').length - (lineOffset || 0);   // EOF errors land on the wrapper's closing line
+          found.line = Math.min(found.line - 1 - (lineOffset || 0), last);
+          if (found.line < 1) found.line = null;
+        }
+        resolve(found);
+      };
+      const onErr = ev => {
+        if (!url || ev.filename !== url) return;
+        ev.preventDefault();
+        found = { message: String(ev.message || '').replace(/^Uncaught\s+/, ''), line: ev.lineno || null, col: ev.colno || null };
+      };
+      try {
+        window.addEventListener('error', onErr, true);
+        url = URL.createObjectURL(new Blob(['(function () {\n' + code + '\n});'], { type: 'application/javascript' }));
+        const sc = document.createElement('script');
+        sc.src = url;
+        sc.onload = sc.onerror = () => { sc.remove(); setTimeout(finish, 0); };
+        document.head.appendChild(sc);
+        setTimeout(finish, 1500);
+      } catch (e) { finish(); }
+    });
+  }
+
+  window.Runner = { run, locateSyntaxError, TIMEOUT_MS };
 })();

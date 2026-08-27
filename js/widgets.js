@@ -229,7 +229,10 @@
       const push = (err, args) => { if (token !== runToken || logs.length > 300) return; logs.push({ err, text: args.map(fmtVal).join(' ') }); renderOut(); };
       const fake = { log: (...a) => push(false, a), info: (...a) => push(false, a), warn: (...a) => push(false, a), error: (...a) => push(true, a) };
       try { new Function('console', RunnerCore.guardLoops(ed.value))(fake); }
-      catch (e) { push(true, ['❌ ' + RunnerCore.errText(e)]); }
+      catch (e) {
+        const loc = RunnerCore.errLoc(e, null, { guard: true });
+        push(true, ['❌ ' + RunnerCore.errText(e) + (loc && loc.line ? ' (line ' + loc.line + (loc.col ? ':' + loc.col : '') + ')' : '')]);
+      }
       renderOut();
       if (!state.ran) {
         state.ran = true; state.solved = true; save();
@@ -472,21 +475,34 @@
     let html = header(cfg.label || (cfg.fix ? 'Fix it' : 'Write it'), state.solved, cfg.fix ? '🔧' : '⌨️');
     if (cfg.q) html += '<div class="q-text">' + cfg.q + '</div>';
     if (cfg.prelude) html += '<details class="ex-prelude"><summary>Provided code</summary>' + window.T.code('js', 'provided', cfg.prelude) + '</details>';
-    html += '<div class="ex-editor-wrap"><div class="codeblock-header"><span>' + esc(cfg.fn + (cfg.isClass ? ' (class)' : '()')) + (cfg.fix ? ' — buggy: find and fix it' : ' — your code') + '</span><span class="kbd-hint">⌘/Ctrl+Enter runs</span></div><div class="editor-host"></div></div>';
+    html += '<div class="ex-editor-wrap"><div class="codeblock-header"><span>' + esc(cfg.fn + (cfg.isClass ? ' (class)' : '()')) + (cfg.fix ? ' — buggy: find and fix it' : ' — your code') + '</span><span class="kbd-hint">⌘/Ctrl+Enter runs tests · ⇧⌘/Ctrl+Enter runs code</span></div><div class="editor-host"></div></div>';
     html += '<div class="widget-actions"><button class="primary mini" data-act="run">▶ Run tests</button>' +
+      '<button class="ghost mini" data-act="scratch" title="Execute the file top-to-bottom with no tests; console.log output and errors (with line numbers) appear in the console panel">▶ Run code</button>' +
       (hints.length ? '<button class="ghost mini" data-act="hint">💡 Hint (' + (state.hints || 0) + '/' + hints.length + ')</button>' : '') +
       '<button class="ghost mini" data-act="reset">Reset code</button></div>';
     html += '<div class="ex-hints" data-hints>' + hints.slice(0, state.hints || 0).map((h, i) => '<div class="ex-hint"><span class="ex-hint-n">Hint ' + (i + 1) + '</span>' + h + '</div>').join('') + '</div>';
+    html += '<div class="repl-out ex-console" data-console></div>';
     html += '<div class="ex-results" data-results></div><div data-after></div>';
     el.innerHTML = html;
-    const ed = window.Editor.create(el.querySelector('.editor-host'), { value: code, minRows: 6, onChange: v => { state.code = v; save(); }, onRun: () => run() });
-    const resultsEl = el.querySelector('[data-results]'), afterEl = el.querySelector('[data-after]');
+    const ed = window.Editor.create(el.querySelector('.editor-host'), { value: code, minRows: 6, onChange: v => { state.code = v; save(); }, onRun: () => run(), onRunAlt: () => runScratch() });
+    const resultsEl = el.querySelector('[data-results]'), afterEl = el.querySelector('[data-after]'), consoleEl = el.querySelector('[data-console]');
+    const lineOffset = window.Exercise.preludeOffset(cfg.prelude);
+    const fullCode = () => (cfg.prelude ? window.T.trim(cfg.prelude) + '\n\n' : '') + ed.value;
+    const paintOpts = { editor: ed, code: fullCode, lineOffset };
+    window.Exercise.paintConsole(consoleEl, { logs: [], hint: window.Exercise.CONSOLE_HINT });
+    let scratching = false;
+    function runScratch() {
+      if (scratching) return;
+      scratching = true;
+      window.Exercise.scratch({ code: ed.value, prelude: cfg.prelude, panel: consoleEl, editor: ed, btn: el.querySelector('[data-act=scratch]') }).then(() => { scratching = false; });
+    }
+    el.querySelector('[data-act=scratch]').addEventListener('click', runScratch);
     function paintAfter() {
       if (!state.solved) { afterEl.innerHTML = ''; return; }
       afterEl.innerHTML = explainBox('<div class="verdict v-right">✓ All tests pass</div>' + (cfg.explain || '')) +
         (cfg.solution ? '<details class="ex-solution"><summary>Reference</summary>' + window.T.code('js', 'reference — ' + cfg.fn, cfg.solution) + (cfg.solutionExplain || '') + '</details>' : '');
     }
-    if (state.lastResults) window.Exercise.paintResults(resultsEl, state.lastResults, cfg.tests, state.lastSummary);
+    if (state.lastResults) window.Exercise.paintResults(resultsEl, state.lastResults, cfg.tests, state.lastSummary, paintOpts);
     paintAfter();
     let running = false;
     function run() {
@@ -495,10 +511,10 @@
       const btn = el.querySelector('[data-act=run]'); btn.disabled = true; btn.textContent = '… running';
       const results = [];
       resultsEl.innerHTML = '<div class="ex-results-empty">Running…</div>';
-      const userCode = (cfg.prelude ? window.T.trim(cfg.prelude) + '\n\n' : '') + ed.value;
-      window.Runner.run({ mode: 'suite', spec: { code: userCode, fn: cfg.fn, isClass: !!cfg.isClass, harness: cfg.harness, tests: cfg.tests } }, {
+      const userCode = fullCode();
+      window.Runner.run({ mode: 'suite', spec: { code: userCode, fn: cfg.fn, isClass: !!cfg.isClass, harness: cfg.harness, tests: cfg.tests, lineOffset } }, {
         onResult: (i, r) => { results[i] = r; },
-        onTimeout: i => { results[i] = { name: cfg.tests[i].name, timeout: true }; },
+        onTimeout: (i, logs) => { results[i] = { name: cfg.tests[i].name, timeout: true, logs }; },
         onDone: summary => {
           running = false; btn.disabled = false; btn.textContent = '▶ Run tests';
           for (let i = 0; i < cfg.tests.length; i++) if (!results[i]) results[i] = { name: cfg.tests[i].name, skipped: true };
@@ -506,7 +522,7 @@
           const allPass = !summary.loadError && !summary.timedOut && results.every(r => r.pass);
           if (allPass && !state.solved) { state.solved = true; const head = el.querySelector('.widget-head'); if (head && !head.querySelector('.widget-solved')) head.insertAdjacentHTML('beforeend', '<span class="widget-solved">✓ solved</span>'); }
           save();
-          window.Exercise.paintResults(resultsEl, results, cfg.tests, summary);
+          window.Exercise.paintResults(resultsEl, results, cfg.tests, summary, paintOpts);
           paintAfter();
         }
       });

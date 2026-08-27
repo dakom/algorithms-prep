@@ -58,6 +58,13 @@ forgotten `visited` set on a cyclic graph produces a "timed out — probably an
 infinite loop" lesson instead of a frozen tab. If Workers are unavailable the
 runner falls back to the main thread with loop guards injected.
 
+Debugging is built in: **▶ Run code** (⇧⌘/Ctrl+Enter) executes the editor's
+file top-to-bottom with no tests and shows `console.log` output in a console
+panel; runtime and syntax errors report the editor line (clickable). Every test
+result — passing or failing — also shows what the code logged during that test,
+and a timed-out test shows what it printed before it hung. Anything logged at
+the top level of the file appears as "top-level output".
+
 Tests are data (`{ name, args, expect }`), or a `run(Class, helpers)` scenario
 for stateful exercises, or a `check(actual, args, helpers)` validator when many
 answers are valid (any shortest path, any valid pair, tie order in top-K).
