@@ -3,14 +3,19 @@
    reported as a lesson instead of freezing the tab. Falls back to main-thread
    execution with loop guards if Workers are unavailable. */
 (function () {
+  /* The job is sent as a JSON string, not a structured-clone object: Chrome's
+     structured-clone deserializer is recursive and gives up on deeply nested
+     values (a ~1000-node tree chain), delivering e.data === null in the worker.
+     JSON.parse handles the same nesting fine. */
   const WORKER_SRC = '(' + RUNNER_CORE.toString() + ')();\n' +
     'onmessage = function (e) {\n' +
-    '  const spec = e.data.spec;\n' +
+    '  const job = JSON.parse(e.data);\n' +
+    '  const spec = job.spec;\n' +
     '  const emit = (index, result) => postMessage({ type: "result", index, result });\n' +
     '  RunnerCore.hooks.onLog = text => postMessage({ type: "log", text });\n' +
     '  const M = { own: RunnerCore.runOwn, break: RunnerCore.runBreak, scratch: RunnerCore.runScratch };\n' +
     '  let summary;\n' +
-    '  try { summary = (M[e.data.mode] || RunnerCore.runSuite)(spec, emit); }\n' +
+    '  try { summary = (M[job.mode] || RunnerCore.runSuite)(spec, emit); }\n' +
     '  catch (err) { summary = { loadError: "internal runner error: " + (err && err.message) }; }\n' +
     '  postMessage({ type: "done", summary });\n' +
     '};';
@@ -109,7 +114,7 @@
         cb.onDone(summary); resolve(summary);
       };
       arm();
-      w.postMessage({ mode: job.mode, spec });
+      w.postMessage(JSON.stringify({ mode: job.mode, spec }));
     });
   }
 
