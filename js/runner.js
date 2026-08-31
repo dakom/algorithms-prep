@@ -3,29 +3,33 @@
    reported as a lesson instead of freezing the tab. Falls back to main-thread
    execution with loop guards if Workers are unavailable. */
 (function () {
-  /* The job is sent as a JSON string, not a structured-clone object: Chrome's
-     structured-clone deserializer is recursive and gives up on deeply nested
-     values (a ~1000-node tree chain), delivering e.data === null in the worker.
-     JSON.parse handles the same nesting fine. */
-  const WORKER_SRC = '(' + RUNNER_CORE.toString() + ')();\n' +
-    'onmessage = function (e) {\n' +
-    '  const job = JSON.parse(e.data);\n' +
-    '  const spec = job.spec;\n' +
-    '  const emit = (index, result) => postMessage({ type: "result", index, result });\n' +
-    '  RunnerCore.hooks.onLog = text => postMessage({ type: "log", text });\n' +
-    '  const M = { own: RunnerCore.runOwn, break: RunnerCore.runBreak, scratch: RunnerCore.runScratch };\n' +
-    '  let summary;\n' +
-    '  try { summary = (M[job.mode] || RunnerCore.runSuite)(spec, emit); }\n' +
-    '  catch (err) { summary = { loadError: "internal runner error: " + (err && err.message) }; }\n' +
-    '  postMessage({ type: "done", summary });\n' +
-    '};';
+  /* The job is EMBEDDED in the worker's blob source as a JSON string literal —
+     never sent via postMessage. Host→worker messages proved fragile in the
+     wild: Chrome's structured-clone deserializer gives up on deeply nested
+     values, and browser extensions that hook page messaging (wallet lockdown /
+     inpage scripts) can mangle large payloads into e.data === null. Nothing
+     can tamper with the worker's own source, and extensions can't inject into
+     the worker realm. Only small result objects flow back the other way. */
+  const RUNNER_CORE_SRC = '(' + RUNNER_CORE.toString() + ')();\n';
+  const RUNNER_MAIN =
+    'const job = JSON.parse(JOB_JSON);\n' +
+    'const spec = job.spec;\n' +
+    'const emit = (index, result) => postMessage({ type: "result", index, result });\n' +
+    'RunnerCore.hooks.onLog = text => postMessage({ type: "log", text });\n' +
+    'const M = { own: RunnerCore.runOwn, break: RunnerCore.runBreak, scratch: RunnerCore.runScratch };\n' +
+    'let summary;\n' +
+    'try { summary = (M[job.mode] || RunnerCore.runSuite)(spec, emit); }\n' +
+    'catch (err) { summary = { loadError: "internal runner error: " + (err && err.message) }; }\n' +
+    'postMessage({ type: "done", summary });\n';
 
-  let workerUrl = null, workerOk = null;
-  function makeWorker() {
+  let workerOk = null;
+  function makeWorker(payloadJson) {
     if (workerOk === false) return null;
     try {
-      if (!workerUrl) workerUrl = URL.createObjectURL(new Blob([WORKER_SRC], { type: 'application/javascript' }));
-      const w = new Worker(workerUrl);
+      const src = RUNNER_CORE_SRC + 'const JOB_JSON = ' + JSON.stringify(payloadJson) + ';\n' + RUNNER_MAIN;
+      const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
+      const w = new Worker(url);
+      w._blobUrl = url;   // revoked by the caller once the run finishes
       return w;
     } catch (e) {
       workerOk = false;
@@ -67,7 +71,7 @@
     if (spec.coverage) spec.coverage = spec.coverage.map(c => ({ label: c.label, hitSrc: c.hit.toString() }));
     delete spec.refFn;
 
-    const w = makeWorker();
+    const w = makeWorker(JSON.stringify({ mode: job.mode, spec }));
     if (!w) {
       // main-thread fallback
       return new Promise(resolve => {
@@ -85,12 +89,13 @@
 
     return new Promise(resolve => {
       let nextIndex = 0, timer = null, finished = false, pendingLogs = [];
+      const finish = () => { w.terminate(); URL.revokeObjectURL(w._blobUrl); };
       const arm = () => {
         clearTimeout(timer);
         timer = setTimeout(() => {
           if (finished) return;
           finished = true;
-          w.terminate();
+          finish();
           const summary = { timedOut: true, timedOutIndex: nextIndex, logs: pendingLogs };
           cb.onTimeout(nextIndex, pendingLogs);
           cb.onDone(summary);
@@ -100,21 +105,21 @@
       w.onmessage = e => {
         if (finished) return;
         const m = e.data;
+        if (!m || !m.type) return;
         if (m.type === 'log') { pendingLogs.push(m.text); return; }
         if (m.type === 'result') { nextIndex = m.index + 1; pendingLogs = []; cb.onResult(m.index, m.result); arm(); }
         else if (m.type === 'done') {
-          finished = true; clearTimeout(timer); w.terminate();
+          finished = true; clearTimeout(timer); finish();
           cb.onDone(m.summary); resolve(m.summary);
         }
       };
       w.onerror = e => {
         if (finished) return;
-        finished = true; clearTimeout(timer); w.terminate();
+        finished = true; clearTimeout(timer); finish();
         const summary = { loadError: 'Your code failed to load — ' + (e.message || 'syntax error') };
         cb.onDone(summary); resolve(summary);
       };
-      arm();
-      w.postMessage(JSON.stringify({ mode: job.mode, spec }));
+      arm();  // the worker starts on its own — the job ships inside its source
     });
   }
 
