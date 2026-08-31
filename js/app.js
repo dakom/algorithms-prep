@@ -7,6 +7,8 @@
   const esc = window.Highlighter.esc;
   const $ = sel => document.querySelector(sel);
 
+  console.log('Algo Prep · build ' + (window.APP_VERSION || 'unknown'));
+
   let storage;
   try { localStorage.setItem('__ap_t', '1'); localStorage.removeItem('__ap_t'); storage = localStorage; }
   catch (e) {

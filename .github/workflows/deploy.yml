@@ -37,6 +37,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Stamp build version
+        run: printf "window.APP_VERSION = '%s (%s)';\n" "${GITHUB_SHA::7}" "$(date -u +%Y-%m-%dT%H:%MZ)" > js/version.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
