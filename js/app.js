@@ -380,5 +380,38 @@
     }
     renderNav(mi, si);
   });
+
+  /* ---------- stale-tab detection ---------- */
+  // Hash routing never refetches scripts, so a long-lived tab silently keeps
+  // running pre-deploy code. On navigation/refocus (throttled) compare the
+  // running build against the deployed js/version.js and offer a reload.
+  (function () {
+    if (window.APP_VERSION === 'dev' || location.protocol === 'file:') return;
+    const CHECK_EVERY = 5 * 60 * 1000;
+    let lastCheck = 0, notified = false;
+    function check() {
+      const now = Date.now();
+      if (notified || now - lastCheck < CHECK_EVERY) return;
+      lastCheck = now;
+      fetch('js/version.js?rt=' + now, { cache: 'no-store' })
+        .then(r => (r.ok ? r.text() : ''))
+        .then(src => {
+          const m = src.match(/APP_VERSION\s*=\s*'([^']*)'/);
+          if (!m || notified || m[1] === window.APP_VERSION) return;
+          notified = true;
+          const el = document.createElement('div');
+          el.className = 'update-toast';
+          el.innerHTML = '<span>New version deployed — build ' + esc(m[1]) + '</span>' +
+            '<button class="primary">Reload</button><button class="ghost" aria-label="Dismiss">✕</button>';
+          el.querySelector('.primary').addEventListener('click', () => location.reload());
+          el.querySelector('.ghost').addEventListener('click', () => el.remove());
+          document.body.appendChild(el);
+        })
+        .catch(() => { /* offline or transient — try again next time */ });
+    }
+    window.addEventListener('hashchange', check);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+  })();
+
   render();
 })();

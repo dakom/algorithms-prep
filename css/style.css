@@ -433,3 +433,7 @@ a.ex-loc { color: var(--accent, var(--text-bright)); text-decoration: underline 
 .widget-kata .ex-hints { margin: 8px 0 0; }
 @media (max-width: 700px) { .ex-board-row.due { grid-template-columns: 90px 1fr; } .ex-board-row.due .ex-board-mod, .ex-board-row.due .ex-board-why { display: none; } .weak-row { grid-template-columns: 120px 1fr 48px; } }
 .drill-code { font-family: var(--mono); font-size: 13px; font-weight: 500; white-space: pre; overflow-x: auto; background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 8px; padding: 10px 12px; line-height: 1.5; color: var(--text); }
+
+/* stale-tab reload toast (see app.js stale-tab detection) */
+.update-toast { position: fixed; right: 16px; bottom: 16px; z-index: 100; display: flex; align-items: center; gap: 10px; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; font-size: 13px; box-shadow: 0 6px 24px #0003; }
+.update-toast button { padding: 5px 12px; font-size: 13px; }
