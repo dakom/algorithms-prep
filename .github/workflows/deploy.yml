@@ -39,6 +39,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Stamp build version
         run: printf "window.APP_VERSION = '%s (%s)';\n" "${GITHUB_SHA::7}" "$(date -u +%Y-%m-%dT%H:%MZ)" > js/version.js
+      # Rewrite index.html asset URLs to js/foo.js?v=<content hash> so browsers
+      # pick up changed files as soon as index.html revalidates (≤10 min on
+      # Pages), while unchanged files keep their URL and stay cached.
+      - name: Cache-bust asset URLs
+        run: |
+          grep -oE '"(js|css)/[^"?]+"' index.html | tr -d '"' | sort -u | while read -r f; do
+            h=$(md5sum "$f" | cut -c1-8)
+            sed -i "s|\"$f\"|\"$f?v=$h\"|g" index.html
+          done
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
